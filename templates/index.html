@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ thống Giám sát Camera AI</title>
+    <!-- Thư viện Bootstrap 5 cho giao diện -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome cho các icon đẹp mắt -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- File CSS tùy chỉnh của chúng ta -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="bg-light">
+
+    <!-- Header (Thanh điều hướng trên cùng) -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary custom-header shadow-sm">
+        <div class="container-fluid">
+            <a class="navbar-brand fw-bold" href="#">
+                Hệ Thống Giám Sát
+            </a>
+        </div>
+    </nav>
+
+    <!-- Nội dung chính -->
+    <div class="container-fluid mt-3">
+        <div class="row g-3">
+            
+            <!-- CỘT 1: Danh sách Camera (Bên trái) -->
+            <div class="col-lg-2 col-md-3">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-header bg-white border-bottom fw-bold text-primary">
+                        DANH SÁCH CAMERA
+                    </div>
+                    <div class="card-body p-2">
+                        <div class="list-group list-group-flush">
+                            <!-- Nút Camera 1 (Đang chọn) -->
+                            <button type="button" class="list-group-item list-group-item-action active rounded mb-1 d-flex justify-content-between align-items-center" data-camera="camera_1">
+                                <span><i class="fas fa-video me-2"></i>Camera 1</span>
+                                <span class="badge bg-secondary rounded-pill status-badge">Offline</span>
+                            </button>
+                            <!-- Nút Camera 2 -->
+                            <button type="button" class="list-group-item list-group-item-action rounded mb-1 text-muted d-flex justify-content-between align-items-center" data-camera="camera_2">
+                                <span><i class="fas fa-video me-2"></i>Camera 2</span>
+                                <span class="badge bg-secondary rounded-pill status-badge">Offline</span>
+                            </button>
+                            <!-- Nút Camera 3 -->
+                            <button type="button" class="list-group-item list-group-item-action rounded mb-1 text-muted d-flex justify-content-between align-items-center" data-camera="camera_3">
+                                <span><i class="fas fa-video me-2"></i>Camera 3</span>
+                                <span class="badge bg-secondary rounded-pill status-badge">Offline</span>
+                            </button>
+                            <!-- Nút Camera 4 -->
+                            <button type="button" class="list-group-item list-group-item-action rounded text-muted d-flex justify-content-between align-items-center" data-camera="camera_4">
+                                <span><i class="fas fa-video me-2"></i>Camera 4</span>
+                                <span class="badge bg-secondary rounded-pill status-badge">Offline</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CỘT 2: Màn hình hiển thị Video (Ở giữa, chiếm nhiều không gian nhất) -->
+            <div class="col-lg-7 col-md-9">
+                <div class="card shadow-sm border-0 video-card">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <span>Trực tiếp: Khu vực 1</span>
+                    </div>
+                    <!-- Khu vực chứa video -->
+                    <div class="card-body p-0 bg-black text-center video-container">
+                        <!-- Thẻ img này sẽ liên tục nhận ảnh từ route /video_feed của Flask -->
+                        <img src="{{ url_for('video_feed') }}" alt="Camera Feed" class="video-feed">
+                    </div>
+                    <div class="card-footer bg-white text-muted small d-flex justify-content-between">
+                        <span id="val-resolution">Độ phân giải: Đang tải...</span>
+                        <span>Mô hình nhận diện: YOLO</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CỘT 3: Bảng Benchmark & Nút Điều khiển (Bên phải) -->
+            <div class="col-lg-3 col-md-12">
+                
+                <!-- Bảng Benchmark (Tốc độ, độ trễ...) -->
+                <div class="card shadow-sm border-0 mb-3">
+                    <button class="card-header bg-white border-bottom fw-bold text-primary d-flex justify-content-between align-items-center w-100 text-start border-0 py-3" type="button" data-bs-toggle="collapse" data-bs-target="#benchmarkCollapse" aria-expanded="true" aria-controls="benchmarkCollapse" style="outline: none; box-shadow: none;">
+                        <span><i class="fas fa-chart-bar me-2"></i>BENCHMARK HỆ THỐNG</span>
+                        <i class="fas fa-chevron-down toggle-icon"></i>
+                    </button>
+                    <div id="benchmarkCollapse" class="collapse show">
+                        <div class="card-body pt-0">
+                            <!-- FPS -->
+                            <div class="d-flex justify-content-between mb-2 align-items-center">
+                                <span class="text-muted fw-semibold">Khung hình/giây (FPS)</span>
+                                <span id="val-fps" class="badge bg-primary fs-6">0</span>
+                            </div>
+                            <div class="progress mb-3" style="height: 6px;">
+                                <div id="progress-fps" class="progress-bar bg-primary progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                            </div>
+
+                            <!-- Độ trễ -->
+                            <div class="d-flex justify-content-between mb-2 align-items-center">
+                                <span class="text-muted fw-semibold">Độ trễ mạng (Ping)</span>
+                                <span id="val-latency" class="badge bg-warning text-dark fs-6">Offline</span>
+                            </div>
+                            <div class="progress mb-3" style="height: 6px;">
+                                <div id="progress-latency" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
+                            </div>
+
+                            <!-- Jetson CPU -->
+                            <div class="d-flex justify-content-between mb-2 align-items-center">
+                                <span class="text-muted fw-semibold">Jetson CPU Load</span>
+                                <span id="val-cpu" class="badge bg-success fs-6">0%</span>
+                            </div>
+                            <div class="progress mb-3" style="height: 6px;">
+                                <div id="progress-cpu" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                            </div>
+
+                            <!-- Jetson RAM & Temp -->
+                            <div class="d-flex justify-content-between mt-2 pt-2 border-top">
+                                <div>
+                                    <span class="text-muted small fw-semibold d-block">Jetson RAM</span>
+                                    <span id="val-ram" class="fw-bold">0%</span>
+                                </div>
+                                <div class="text-end">
+                                    <span class="text-muted small fw-semibold d-block">Nhiệt độ</span>
+                                    <span id="val-temp" class="fw-bold">0°C</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bảng tính năng điều khiển -->
+                <div class="card shadow-sm border-0">
+                    <div class="card-header bg-white border-bottom fw-bold text-primary">
+                        TÍNH NĂNG ĐIỀU KHIỂN
+                    </div>
+                    <div class="card-body">
+                        <div class="d-grid gap-2">
+                            <button id="btn-capture" class="btn btn-outline-success text-start">
+                                Chụp ảnh
+                            </button>
+                            <button class="btn btn-outline-info text-start">
+                                Xem danh sách định danh
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Script xử lý các nút bấm -->
+    <script>
+        let activeCamera = "camera_1";
+
+        // Xử lý chuyển đổi Camera
+        const cameraButtons = document.querySelectorAll('[data-camera]');
+        const videoFeed = document.querySelector('.video-feed');
+
+        // Hàm đổi luồng camera
+        function setCameraStream(cameraId) {
+            activeCamera = cameraId;
+            videoFeed.src = `/video_feed/${cameraId}?t=` + new Date().getTime();
+        }
+
+        // Tự động thử lại khi luồng bị lỗi hoặc chưa khởi động kịp
+        videoFeed.onerror = function() {
+            console.log("Mất kết nối camera. Thử lại sau 2 giây...");
+            setTimeout(() => {
+                videoFeed.src = `/video_feed/${activeCamera}?t=` + new Date().getTime();
+            }, 2000);
+        };
+
+        cameraButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                // Xóa active trên tất cả nút cũ
+                cameraButtons.forEach(btn => {
+                    btn.classList.remove('active');
+                    btn.classList.add('text-muted');
+                });
+                
+                // Thêm active vào nút vừa click
+                this.classList.add('active');
+                this.classList.remove('text-muted');
+                
+                // Đổi tiêu đề hiển thị trên màn hình trực tiếp
+                const cameraName = this.querySelector('span').innerText.trim();
+                document.querySelector('.video-card .card-header span').innerText = `Trực tiếp: ${cameraName}`;
+                
+                // Cập nhật Camera ID hiện tại và đổi src
+                setCameraStream(this.getAttribute('data-camera'));
+            });
+        });
+
+        // Xử lý nút Chụp ảnh
+        document.getElementById('btn-capture').addEventListener('click', function() {
+            // Thay đổi text nút khi đang chụp
+            const btn = this;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = 'Đang chụp...';
+            btn.disabled = true;
+
+            fetch(`/capture/${activeCamera}`, { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if(data.status === 'success') {
+                    alert('📸 ' + data.message);
+                } else {
+                    alert('❌ Lỗi: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Lỗi:', error);
+                alert('❌ Không thể kết nối tới server.');
+            })
+            .finally(() => {
+                // Phục hồi lại nút
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            });
+        });
+
+        // Hàm cập nhật benchmark từ API
+        function updateStats() {
+            fetch('/api/stats')
+            .then(response => response.json())
+            .then(data => {
+                // 1. Cập nhật thông số Camera hiện tại đang được chọn
+                const camData = data.cameras[activeCamera];
+                if (camData) {
+                    const fps = camData.fps;
+                    document.getElementById('val-fps').innerText = fps;
+                    const fpsPercent = Math.min(100, (fps / 30) * 100); // Thường là 30fps max
+                    document.getElementById('progress-fps').style.width = fpsPercent + '%';
+                    
+                    document.getElementById('val-resolution').innerText = `Độ phân giải: ${camData.resolution}`;
+                }
+                
+                // 2. Cập nhật thông số Jetson
+                const jetson = data.jetson;
+                
+                // Cập nhật Ping độc lập với Stats Server
+                if (jetson.latency > 0) {
+                    document.getElementById('val-latency').innerText = jetson.latency + ' ms';
+                    const latPercent = Math.min(100, (jetson.latency / 200) * 100);
+                    document.getElementById('progress-latency').style.width = latPercent + '%';
+                } else {
+                    document.getElementById('val-latency').innerText = 'Offline';
+                    document.getElementById('progress-latency').style.width = '0%';
+                }
+
+                if (jetson.online) {
+                    // CPU
+                    document.getElementById('val-cpu').innerText = jetson.cpu + '%';
+                    document.getElementById('progress-cpu').style.width = jetson.cpu + '%';
+                    
+                    // RAM
+                    document.getElementById('val-ram').innerText = jetson.ram + '%';
+                    
+                    // Temp
+                    document.getElementById('val-temp').innerText = jetson.temp + '°C';
+                } else {
+                    document.getElementById('val-cpu').innerText = '0%';
+                    document.getElementById('progress-cpu').style.width = '0%';
+                    document.getElementById('val-ram').innerText = '0%';
+                    document.getElementById('val-temp').innerText = '0°C';
+                }
+
+                // 3. Cập nhật trạng thái của tất cả các nút Camera trong danh sách
+                for (const camId in data.cameras) {
+                    const status = data.cameras[camId].status;
+                    const btn = document.querySelector(`[data-camera="${camId}"]`);
+                    if (btn) {
+                        const badge = btn.querySelector('.status-badge');
+                        if (badge) {
+                            badge.innerText = status;
+                            if (status === 'Online') {
+                                badge.className = 'badge bg-success rounded-pill status-badge';
+                            } else if (status === 'Connecting') {
+                                badge.className = 'badge bg-warning text-dark rounded-pill status-badge';
+                            } else {
+                                badge.className = 'badge bg-secondary rounded-pill status-badge';
+                            }
+                        }
+                    }
+                }
+            })
+            .catch(err => console.error('Error fetching stats:', err));
+        }
+
+        // Cập nhật mỗi 1 giây
+        setInterval(updateStats, 1000);
+        updateStats();
+    </script>
+</body>
+</html>
