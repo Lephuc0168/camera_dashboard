@@ -14,3 +14,9 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# User captures and face registrations (ignore all images but keep folder structure)
+static/captures/*
+!static/captures/.gitkeep
+static/face_registrations/*
+!static/face_registrations/.gitkeep

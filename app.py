@@ -1,6 +1,7 @@
 import cv2
-from flask import Flask, render_template, Response, jsonify
+from flask import Flask, render_template, Response, jsonify, request
 import os
+import base64
 import datetime
 import time
 import threading
@@ -200,6 +201,48 @@ def capture(camera_id):
     
     cv2.imwrite(filepath, latest_frames[camera_id])
     return jsonify({"status": "success", "message": f"Đã chụp và lưu thành công {filename}"})
+
+@app.route('/api/register_face', methods=['POST'])
+def register_face():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "Không nhận được dữ liệu"}), 400
+            
+        username = data.get("username", "").strip()
+        if not username:
+            return jsonify({"status": "error", "message": "Vui lòng nhập tên người dùng"}), 400
+            
+        # Chuẩn hóa tên thư mục (chặn các ký tự đặc biệt)
+        sanitized_username = re.sub(r'[\\/*?:"<>|]', "", username).replace(" ", "_")
+        if not sanitized_username:
+            sanitized_username = "user"
+            
+        # Tạo thư mục con riêng trong static/face_registrations
+        save_dir = os.path.join('static', 'face_registrations', sanitized_username)
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # Lưu 3 kiểu ảnh
+        poses = ['front', 'left', 'right']
+        for pose in poses:
+            img_data = data.get(pose)
+            if not img_data:
+                return jsonify({"status": "error", "message": f"Thiếu ảnh kiểu {pose}"}), 400
+                
+            if ',' in img_data:
+                img_data = img_data.split(',')[1]
+                
+            decoded_img = base64.b64decode(img_data)
+            
+            # Lưu file ảnh
+            filename = f"{pose}.jpg"
+            filepath = os.path.join(save_dir, filename)
+            with open(filepath, 'wb') as f:
+                f.write(decoded_img)
+                
+        return jsonify({"status": "success", "message": f"Đăng ký khuôn mặt thành công cho {username}"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Có lỗi xảy ra: {str(e)}"}), 500
 
 if __name__ == '__main__':
     # Chạy Flask ở chế độ debug, lắng nghe trên 0.0.0.0 để các máy khác trong mạng LAN có thể xem
