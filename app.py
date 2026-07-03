@@ -49,12 +49,13 @@ stats_lock = threading.Lock()
 ort_session = None
 try:
     # Sử dụng CPU Execution Provider để chạy suy luận ổn định trên máy chủ
-    ort_session = ort.InferenceSession("detection_fp16.onnx", providers=['CPUExecutionProvider'])
-    print("[+] Loaded face detection model detection_fp16.onnx successfully!")
+    # Dùng detection_fixed.onnx đã được trích xuất các layer trung gian để tránh bug nén lượng hóa (quantization bug)
+    ort_session = ort.InferenceSession("detection_fixed.onnx", providers=['CPUExecutionProvider'])
+    print("[+] Loaded face detection model detection_fixed.onnx successfully!")
 except Exception as e:
     print(f"[-] Failed to load face detection model: {e}")
 
-def detect_faces(image, conf_threshold=0.4, iou_threshold=0.45):
+def detect_faces(image, conf_threshold=0.2, iou_threshold=0.45):
     """
     Phát hiện các khuôn mặt trong ảnh bằng mô hình YOLOv8 ONNX.
     Trả về danh sách các bounding boxes dạng [x1, y1, x2, y2] theo kích thước gốc của ảnh.
@@ -64,26 +65,29 @@ def detect_faces(image, conf_threshold=0.4, iou_threshold=0.45):
         
     h_orig, w_orig = image.shape[:2]
     
-    # Tiền xử lý ảnh cho YOLOv8 (640x640, RGB, normalize 1/255)
+    # Tiền xử lý ảnh cho YOLOv8 (640x640, BGR, normalize 1/255)
     img_resized = cv2.resize(image, (640, 640))
-    img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
-    img_input = img_rgb.astype(np.float32) / 255.0
+    img_input = img_resized.astype(np.float32) / 255.0
     img_input = np.transpose(img_input, (2, 0, 1))
     img_input = np.expand_dims(img_input, axis=0)
     
     try:
-        # Chạy inference
-        outputs = ort_session.run(["output0"], {"images": img_input})
-        predictions = outputs[0][0] # Shape: (5, 8400)
-        predictions = predictions.T # Shape: (8400, 5)
+        # Chạy inference lấy output trung gian để tránh bug lượng hóa làm mất confidence score của YOLOv8
+        output_names = [
+            '/model.23/Mul_2_output_0_DequantizeLinear_Output',
+            '/model.23/Sigmoid_output_0_DequantizeLinear_Output'
+        ]
+        outputs = ort_session.run(output_names, {"images": img_input})
+        boxes_tensor = outputs[0][0]  # shape (4, 8400)
+        scores_tensor = outputs[1][0] # shape (1, 8400)
         
         boxes = []
         confidences = []
         
-        for row in predictions:
-            confidence = row[4]
+        for idx in range(8400):
+            confidence = scores_tensor[0, idx]
             if confidence >= conf_threshold:
-                x_center, y_center, width, height = row[0:4]
+                x_center, y_center, width, height = boxes_tensor[:, idx]
                 
                 # Chuyển về tọa độ x, y, w, h
                 x = x_center - width / 2
