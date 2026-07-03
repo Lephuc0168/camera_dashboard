@@ -384,6 +384,98 @@ def capture(camera_id):
             "faces_count": 0
         })
 
+@app.route('/api/capture_preview/<camera_id>', methods=['POST'])
+def capture_preview(camera_id):
+    global clean_frames
+    clean_frame = None
+    with clean_frame_locks[camera_id]:
+        if camera_id in clean_frames and clean_frames[camera_id] is not None:
+            clean_frame = clean_frames[camera_id].copy()
+            
+    if clean_frame is None:
+        return jsonify({"status": "error", "message": f"Chưa có hình ảnh từ {camera_id}"}), 400
+        
+    face_boxes = detect_faces(clean_frame)
+    images_to_return = []
+    
+    if len(face_boxes) > 0:
+        for idx, (x1, y1, x2, y2) in enumerate(face_boxes):
+            face_img = clean_frame[y1:y2, x1:x2]
+            ret, buffer = cv2.imencode('.jpg', face_img)
+            if ret:
+                base64_str = base64.b64encode(buffer.tobytes()).decode('utf-8')
+                images_to_return.append({
+                    "type": "face",
+                    "data": f"data:image/jpeg;base64,{base64_str}",
+                    "label": f"Khuôn mặt {idx + 1}"
+                })
+    else:
+        # Fallback: Chụp toàn bộ khung hình
+        ret, buffer = cv2.imencode('.jpg', clean_frame)
+        if ret:
+            base64_str = base64.b64encode(buffer.tobytes()).decode('utf-8')
+            images_to_return.append({
+                "type": "full",
+                "data": f"data:image/jpeg;base64,{base64_str}",
+                "label": "Khung hình đầy đủ (Không phát hiện khuôn mặt)"
+            })
+            
+    if not images_to_return:
+        return jsonify({"status": "error", "message": "Lỗi mã hóa hình ảnh preview"}), 500
+        
+    return jsonify({
+        "status": "success",
+        "images": images_to_return,
+        "camera_id": camera_id
+    })
+
+@app.route('/api/save_captured_images', methods=['POST'])
+def save_captured_images():
+    try:
+        data = request.get_json()
+        if not data or 'images' not in data or 'camera_id' not in data:
+            return jsonify({"status": "error", "message": "Dữ liệu không đầy đủ"}), 400
+            
+        camera_id = data['camera_id']
+        images = data['images']
+        
+        save_dir = os.path.join('static', 'captures')
+        os.makedirs(save_dir, exist_ok=True)
+        
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        saved_count = 0
+        
+        for idx, img_obj in enumerate(images):
+            img_data = img_obj.get('data', '')
+            img_type = img_obj.get('type', 'face')
+            
+            if ',' in img_data:
+                img_data = img_data.split(',')[1]
+                
+            decoded_img = base64.b64decode(img_data)
+            
+            # Khôi phục thành numpy array để lưu bằng OpenCV
+            nparr = np.frombuffer(decoded_img, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if img is not None:
+                prefix = "face" if img_type == "face" else "full"
+                filename = f"{prefix}_{camera_id}_{timestamp}_{idx + 1}.jpg"
+                filepath = os.path.join(save_dir, filename)
+                cv2.imwrite(filepath, img)
+                saved_count += 1
+                
+        if saved_count > 0:
+            return jsonify({
+                "status": "success",
+                "message": f"Đã lưu thành công {saved_count} hình ảnh vào thư mục captures!"
+            })
+        else:
+            return jsonify({"status": "error", "message": "Không thể lưu hình ảnh nào"}), 400
+            
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Lỗi lưu ảnh: {str(e)}"}), 500
+
 @app.route('/api/register_face', methods=['POST'])
 def register_face():
     try:
