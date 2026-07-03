@@ -9,6 +9,8 @@ import subprocess
 import re
 import urllib.request
 import json
+import numpy as np
+import onnxruntime as ort
 
 app = Flask(__name__)
 
@@ -42,6 +44,84 @@ jetson_system_stats = {
 }
 
 stats_lock = threading.Lock()
+
+# Tải mô hình phát hiện khuôn mặt ONNX
+ort_session = None
+try:
+    # Sử dụng CPU Execution Provider để chạy suy luận ổn định trên máy chủ
+    ort_session = ort.InferenceSession("detection_fp16.onnx", providers=['CPUExecutionProvider'])
+    print("[+] Loaded face detection model detection_fp16.onnx successfully!")
+except Exception as e:
+    print(f"[-] Failed to load face detection model: {e}")
+
+def detect_faces(image, conf_threshold=0.4, iou_threshold=0.45):
+    """
+    Phát hiện các khuôn mặt trong ảnh bằng mô hình YOLOv8 ONNX.
+    Trả về danh sách các bounding boxes dạng [x1, y1, x2, y2] theo kích thước gốc của ảnh.
+    """
+    if ort_session is None:
+        return []
+        
+    h_orig, w_orig = image.shape[:2]
+    
+    # Tiền xử lý ảnh cho YOLOv8 (640x640, RGB, normalize 1/255)
+    img_resized = cv2.resize(image, (640, 640))
+    img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
+    img_input = img_rgb.astype(np.float32) / 255.0
+    img_input = np.transpose(img_input, (2, 0, 1))
+    img_input = np.expand_dims(img_input, axis=0)
+    
+    try:
+        # Chạy inference
+        outputs = ort_session.run(["output0"], {"images": img_input})
+        predictions = outputs[0][0] # Shape: (5, 8400)
+        predictions = predictions.T # Shape: (8400, 5)
+        
+        boxes = []
+        confidences = []
+        
+        for row in predictions:
+            confidence = row[4]
+            if confidence >= conf_threshold:
+                x_center, y_center, width, height = row[0:4]
+                
+                # Chuyển về tọa độ x, y, w, h
+                x = x_center - width / 2
+                y = y_center - height / 2
+                
+                # Map về kích thước ảnh gốc
+                x_scaled = int(x * w_orig / 640.0)
+                y_scaled = int(y * h_orig / 640.0)
+                w_scaled = int(width * w_orig / 640.0)
+                h_scaled = int(height * h_orig / 640.0)
+                
+                boxes.append([x_scaled, y_scaled, w_scaled, h_scaled])
+                confidences.append(float(confidence))
+                
+        if len(boxes) == 0:
+            return []
+            
+        # Áp dụng NMS (Non-Maximum Suppression) để loại bỏ các ô trùng lặp
+        indices = cv2.dnn.NMSBoxes(boxes, confidences, conf_threshold, iou_threshold)
+        
+        final_boxes = []
+        if len(indices) > 0:
+            if isinstance(indices, np.ndarray):
+                indices = indices.flatten()
+            for idx in indices:
+                x, y, w, h = boxes[idx]
+                x1 = max(0, x)
+                y1 = max(0, y)
+                x2 = min(w_orig, x + w)
+                y2 = min(h_orig, y + h)
+                
+                if x2 > x1 and y2 > y1:
+                    final_boxes.append([x1, y1, x2, y2])
+                    
+        return final_boxes
+    except Exception as e:
+        print(f"[-] Inference error: {e}")
+        return []
 
 def update_jetson_stats_loop():
     global jetson_system_stats
@@ -85,11 +165,15 @@ def update_jetson_stats_loop():
 t = threading.Thread(target=update_jetson_stats_loop, daemon=True)
 t.start()
 
-# Dict lưu lock riêng cho từng camera để truy xuất latest_frames an toàn
+# Caches và khóa tương ứng phục vụ cơ chế xử lý không đồng bộ
+latest_frames = {cam_id: None for cam_id in VIDEO_SOURCES}       # Chứa frame có vẽ khung đỏ (để phát stream)
+clean_frames = {cam_id: None for cam_id in VIDEO_SOURCES}        # Chứa frame sạch (để chụp và trích xuất khuôn mặt)
+
 frame_locks = {cam_id: threading.Lock() for cam_id in VIDEO_SOURCES}
+clean_frame_locks = {cam_id: threading.Lock() for cam_id in VIDEO_SOURCES}
 
 def camera_reader_loop(camera_id):
-    global latest_frames, camera_stats
+    global clean_frames, camera_stats, latest_frames
     source = VIDEO_SOURCES[camera_id]
     
     while True:
@@ -135,18 +219,67 @@ def camera_reader_loop(camera_id):
                 fps_counter = 0
                 fps_start_time = time.time()
                 
-            with frame_locks[camera_id]:
-                latest_frames[camera_id] = frame.copy()
+            # Lưu frame sạch vào bộ nhớ cache riêng biệt
+            with clean_frame_locks[camera_id]:
+                clean_frames[camera_id] = frame.copy()
                 
+            # Nếu chưa/không sử dụng model AI phát hiện khuôn mặt, copy trực tiếp sang display cache
+            if ort_session is None:
+                with frame_locks[camera_id]:
+                    latest_frames[camera_id] = frame.copy()
+                    
             time.sleep(0.01)
             
         cap.release()
         time.sleep(1)
 
-# Khởi chạy các thread đọc camera ngầm
+def face_detection_loop(camera_id):
+    global latest_frames, clean_frames
+    
+    while True:
+        if ort_session is None:
+            time.sleep(1.0)
+            continue
+            
+        # Lấy bản sao của frame sạch mới nhất để chạy nhận diện
+        frame = None
+        with clean_frame_locks[camera_id]:
+            if clean_frames[camera_id] is not None:
+                frame = clean_frames[camera_id].copy()
+                
+        if frame is None:
+            time.sleep(0.1)
+            continue
+            
+        try:
+            # Phát hiện khuôn mặt
+            face_boxes = detect_faces(frame)
+            
+            # Tạo frame hiển thị và vẽ các khung đỏ + nhãn "face"
+            display_frame = frame.copy()
+            for (x1, y1, x2, y2) in face_boxes:
+                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                cv2.putText(display_frame, "face", (x1, max(y1 - 10, 0)), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
+                            
+            # Cập nhật vào latest_frames phục vụ luồng truyền phát
+            with frame_locks[camera_id]:
+                latest_frames[camera_id] = display_frame
+        except Exception as e:
+            print(f"[-] Error in face detection loop for {camera_id}: {e}")
+            with frame_locks[camera_id]:
+                latest_frames[camera_id] = frame.copy()
+                
+        # Giới hạn tần suất suy luận tối đa ~10-12 FPS để tránh quá tải CPU
+        time.sleep(0.08)
+
+# Khởi chạy các thread đọc và phát hiện khuôn mặt chạy ngầm
 for cam_id in VIDEO_SOURCES:
     t_cam = threading.Thread(target=camera_reader_loop, args=(cam_id,), daemon=True)
     t_cam.start()
+    
+    t_det = threading.Thread(target=face_detection_loop, args=(cam_id,), daemon=True)
+    t_det.start()
 
 def generate_frames(camera_id):
     global latest_frames
@@ -203,25 +336,53 @@ def capture_default():
 
 @app.route('/capture/<camera_id>', methods=['POST'])
 def capture(camera_id):
-    global latest_frames
-    frame = None
-    with frame_locks[camera_id]:
-        if camera_id in latest_frames and latest_frames[camera_id] is not None:
-            frame = latest_frames[camera_id].copy()
+    global clean_frames
+    clean_frame = None
+    with clean_frame_locks[camera_id]:
+        if camera_id in clean_frames and clean_frames[camera_id] is not None:
+            clean_frame = clean_frames[camera_id].copy()
             
-    if frame is None:
+    if clean_frame is None:
         return jsonify({"status": "error", "message": f"Chưa có hình ảnh từ {camera_id}"}), 400
         
     # Tạo thư mục lưu nếu chưa có
     save_dir = os.path.join('static', 'captures')
     os.makedirs(save_dir, exist_ok=True)
     
-    # Tạo tên file theo thời gian và camera id
-    filename = f"{camera_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-    filepath = os.path.join(save_dir, filename)
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    cv2.imwrite(filepath, frame)
-    return jsonify({"status": "success", "message": f"Đã chụp và lưu thành công {filename}"})
+    # Thực hiện phát hiện khuôn mặt bằng model ONNX để cắt ảnh
+    face_boxes = detect_faces(clean_frame)
+    
+    if len(face_boxes) > 0:
+        saved_files = []
+        for idx, (x1, y1, x2, y2) in enumerate(face_boxes):
+            # Cắt lấy riêng vùng khuôn mặt từ frame sạch
+            face_img = clean_frame[y1:y2, x1:x2]
+            
+            filename = f"face_{camera_id}_{timestamp}_{idx + 1}.jpg"
+            filepath = os.path.join(save_dir, filename)
+            cv2.imwrite(filepath, face_img)
+            saved_files.append(filename)
+            
+        msg = f"Đã phát hiện và chụp/lưu thành công {len(saved_files)} khuôn mặt!"
+        return jsonify({
+            "status": "success", 
+            "message": msg,
+            "filename": saved_files[0],
+            "faces_count": len(saved_files)
+        })
+    else:
+        # Fallback: Nếu không phát hiện thấy khuôn mặt nào, chụp lại toàn bộ camera để tránh lỗi luồng
+        filename = f"full_{camera_id}_{timestamp}.jpg"
+        filepath = os.path.join(save_dir, filename)
+        cv2.imwrite(filepath, clean_frame)
+        return jsonify({
+            "status": "success", 
+            "message": f"Không tìm thấy khuôn mặt, đã chụp toàn bộ khung hình: {filename}",
+            "filename": filename,
+            "faces_count": 0
+        })
 
 @app.route('/api/register_face', methods=['POST'])
 def register_face():

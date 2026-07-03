@@ -108,7 +108,7 @@ ai_camera_dashboard/
 | :--- | :--- | :--- |
 | **Giám sát Camera Đa kênh** | Người dùng click chọn các camera (Camera 1 - 2) ở menu trái. Giao diện thay đổi nguồn phát tức thì mà không cần kết nối lại từ đầu. | Nhận request `/video_feed/<camera_id>`, trích xuất liên tục khung hình mới nhất từ RAM cache và mã hóa JPEG truyền đi. |
 | **Đo lường Benchmark Hệ thống** | Cập nhật động mỗi 1 giây thông qua cơ chế Ajax polling. Hiển thị FPS thực tế, độ trễ Ping (ms), tải CPU (%), RAM (%), nhiệt độ (°C) thông qua các thanh tiến trình trực quan. | Luồng ngầm liên tục ping và truy vấn API giám sát phần cứng của Jetson. Cung cấp API endpoint `/api/stats` trả về JSON chứa toàn bộ dữ liệu mới nhất. |
-| **Chụp ảnh Giám sát (Snapshot)** | Nút "Chụp ảnh" gửi yêu cầu POST đến hệ thống. Khi chụp thành công, hiển thị thông báo tên file ảnh đã lưu. | Endpoint `/capture/<camera_id>` sao chép an toàn frame mới nhất trong bộ nhớ cache (`latest_frames`), ghi file ảnh chất lượng cao vào thư mục `static/captures/`. |
+| **Chụp ảnh Giám sát (Snapshot)** | Nút "Chụp ảnh" gửi yêu cầu POST đến hệ thống. Khi chụp thành công, hiển thị thông báo tên file ảnh đã lưu. | Endpoint `/capture/<camera_id>` sử dụng mô hình YOLOv8 ONNX (`detection_fp16.onnx`) để tìm khuôn mặt trên khung hình sạch. Nếu phát hiện thấy khuôn mặt, hệ thống tự động cắt và lưu riêng biệt các vùng khuôn mặt này (`face_<cam>_<time>_<idx>.jpg`). Nếu không phát hiện khuôn mặt, hệ thống tự động lưu toàn bộ khung hình làm phương án dự phòng (`full_<cam>_<time>.jpg`). |
 | **Đăng ký Khuôn mặt cục bộ** | Nhập Họ & Tên nhân viên. Sử dụng Webcam cục bộ để hướng dẫn chụp 3 góc độ. Có ảnh xem trước (Preview) ở mỗi góc chụp. Cho phép nhấn vào để phóng to kiểm tra chất lượng. | Nhận gói dữ liệu JSON từ `/api/register_face` chứa chuỗi ảnh mã hóa Base64. Giải mã Base64 thành nhị phân, tự động làm sạch tên người dùng tạo thư mục và ghi các file `front.jpg`, `left.jpg`, `right.jpg`. |
 
 ---
@@ -119,10 +119,11 @@ ai_camera_dashboard/
 1.  Trình duyệt yêu cầu luồng: `<img src="/video_feed/camera_1">`.
 2.  Flask kích hoạt hàm generator `generate_frames("camera_1")`.
 3.  Vòng lặp liên tục:
-    *   Sử dụng khóa `frame_locks["camera_1"]` để lấy bản sao khung hình mới nhất từ `latest_frames["camera_1"]` (được luồng ngầm liên tục ghi vào).
+    *   Sử dụng khóa `frame_locks["camera_1"]` để lấy bản sao khung hình mới nhất từ `latest_frames["camera_1"]`.
+    *   *Lưu ý về phát hiện khuôn mặt:* `latest_frames` được luồng xử lý AI chạy ngầm (`face_detection_loop`) cập nhật liên tục với các khung chữ nhật đỏ vẽ quanh khuôn mặt kèm nhãn "face" (tần suất ~ 10 FPS để tránh lag và tiết kiệm tài nguyên CPU).
     *   Mã hóa khung hình sang dạng nén `.jpg`.
     *   Truyền tải luồng byte qua lệnh `yield` định dạng MJPEG.
-    *   *Lợi ích:* Do luồng ngầm đã kết nối sẵn tới camera từ trước, việc chuyển đổi camera trên giao diện web diễn ra tức thời mà không phải đợi OpenCV khởi động kết nối mạng.
+    *   *Lợi ích:* Độc lập hoàn toàn giữa luồng đọc camera (30 FPS), luồng chạy AI (10 FPS) và luồng phản hồi Flask giúp chuyển đổi camera tức thời và không bao giờ bị nghẽn camera.
 
 ### 5.2. Luồng đăng ký dữ liệu khuôn mặt (Face Dataset Pipeline)
 1.  Người dùng điền tên "Nguyễn Văn A" và thực hiện chụp 3 ảnh trên giao diện.
@@ -156,7 +157,7 @@ source .venv/bin/activate
 
 ### Bước 2: Cài đặt các Thư viện cần thiết
 ```bash
-pip install flask opencv-python
+pip install flask opencv-python onnxruntime numpy
 ```
 
 ### Bước 3: Cấu hình Địa chỉ IP Thiết bị Biên / Camera
