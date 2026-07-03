@@ -16,10 +16,8 @@ app = Flask(__name__)
 # CẤU HÌNH CÁC NGUỒN VIDEO (HỖ TRỢ 4 CAMERA)
 # ==========================================
 VIDEO_SOURCES = {
-    "camera_1": "tcp://192.168.31.102:5005",
-    "camera_2": "tcp://192.168.31.102:5006",
-    "camera_3": "tcp://192.168.31.102:5007",
-    "camera_4": "tcp://192.168.31.102:5008"
+    "camera_1": "udp://@192.168.31.171:5005",
+    "camera_2": "udp://@192.168.31.171:5006"
 }
 
 # Lưu frame mới nhất của từng camera để chụp ảnh độc lập
@@ -87,78 +85,96 @@ def update_jetson_stats_loop():
 t = threading.Thread(target=update_jetson_stats_loop, daemon=True)
 t.start()
 
+# Dict lưu lock riêng cho từng camera để truy xuất latest_frames an toàn
+frame_locks = {cam_id: threading.Lock() for cam_id in VIDEO_SOURCES}
+
+def camera_reader_loop(camera_id):
+    global latest_frames, camera_stats
+    source = VIDEO_SOURCES[camera_id]
+    
+    while True:
+        with stats_lock:
+            camera_stats[camera_id]["status"] = "Connecting"
+            camera_stats[camera_id]["fps"] = 0
+            
+        print(f"[*] Background: Connecting to {camera_id}: {source}...")
+        cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+        
+        if not cap.isOpened():
+            print(f"[-] Background: Failed to connect to {camera_id}. Retrying in 2s...")
+            with stats_lock:
+                camera_stats[camera_id]["status"] = "Offline"
+            cap.release()
+            time.sleep(2)
+            continue
+            
+        print(f"[+] Background: Successfully connected to {camera_id}!")
+        
+        # Biến tính toán FPS thực tế
+        fps_start_time = time.time()
+        fps_counter = 0
+        
+        while True:
+            success, frame = cap.read()
+            if not success:
+                print(f"[-] Background: Disconnected or lost stream from {camera_id}. Reconnecting...")
+                with stats_lock:
+                    camera_stats[camera_id]["status"] = "Offline"
+                    camera_stats[camera_id]["fps"] = 0
+                break
+                
+            fps_counter += 1
+            elapsed = time.time() - fps_start_time
+            if elapsed >= 1.0:
+                current_fps = int(fps_counter / elapsed)
+                h, w = frame.shape[:2]
+                with stats_lock:
+                    camera_stats[camera_id]["status"] = "Online"
+                    camera_stats[camera_id]["fps"] = current_fps
+                    camera_stats[camera_id]["resolution"] = f"{w}x{h}"
+                fps_counter = 0
+                fps_start_time = time.time()
+                
+            with frame_locks[camera_id]:
+                latest_frames[camera_id] = frame.copy()
+                
+            time.sleep(0.01)
+            
+        cap.release()
+        time.sleep(1)
+
+# Khởi chạy các thread đọc camera ngầm
+for cam_id in VIDEO_SOURCES:
+    t_cam = threading.Thread(target=camera_reader_loop, args=(cam_id,), daemon=True)
+    t_cam.start()
+
 def generate_frames(camera_id):
     global latest_frames
     
     if camera_id not in VIDEO_SOURCES:
         return
         
-    source = VIDEO_SOURCES[camera_id]
-    cap = None
-    
-    # Biến đo FPS thực tế
-    fps_start_time = time.time()
-    fps_counter = 0
-    
     while True:
-        # Nếu chưa khởi tạo hoặc kết nối bị đóng, tạo mới VideoCapture
-        if cap is None or not cap.isOpened():
-            with stats_lock:
-                camera_stats[camera_id]["status"] = "Connecting"
-                camera_stats[camera_id]["fps"] = 0
+        frame = None
+        with frame_locks[camera_id]:
+            if latest_frames[camera_id] is not None:
+                frame = latest_frames[camera_id].copy()
                 
-            if cap is not None:
-                cap.release()
-            print(f"[*] Connecting to {camera_id}: {source}...")
-            cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
-            
-            if not cap.isOpened():
-                print(f"[-] Failed to connect to {camera_id}. Retrying in 2s...")
-                with stats_lock:
-                    camera_stats[camera_id]["status"] = "Offline"
-                time.sleep(2)
-                continue
-            print(f"[+] Successfully connected to {camera_id}!")
-            
-        success, frame = cap.read()
-        if not success:
-            print(f"[-] Disconnected or waiting for stream from {camera_id}. Reconnecting...")
-            with stats_lock:
-                camera_stats[camera_id]["status"] = "Offline"
-                camera_stats[camera_id]["fps"] = 0
-            cap.release()
-            cap = None
-            time.sleep(1)
+        if frame is None:
+            time.sleep(0.1)
             continue
             
-        # Tính toán FPS thực tế
-        fps_counter += 1
-        elapsed = time.time() - fps_start_time
-        if elapsed >= 1.0:
-            current_fps = int(fps_counter / elapsed)
-            h, w = frame.shape[:2]
-            with stats_lock:
-                camera_stats[camera_id]["fps"] = current_fps
-                camera_stats[camera_id]["resolution"] = f"{w}x{h}"
-                camera_stats[camera_id]["status"] = "Online"
-            fps_counter = 0
-            fps_start_time = time.time()
-            
-        # Lưu lại frame mới nhất để chụp ảnh
-        latest_frames[camera_id] = frame.copy()
-        
         # Mã hóa frame sang định dạng JPEG
         ret, buffer = cv2.imencode('.jpg', frame)
         if not ret:
+            time.sleep(0.03)
             continue
         frame_bytes = buffer.tobytes()
         
         # Trả về luồng byte MJPEG cho trình duyệt
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-               
-    if cap is not None:
-        cap.release()
+        time.sleep(0.03)
 
 @app.route('/api/stats')
 def get_stats():
@@ -188,7 +204,12 @@ def capture_default():
 @app.route('/capture/<camera_id>', methods=['POST'])
 def capture(camera_id):
     global latest_frames
-    if camera_id not in latest_frames or latest_frames[camera_id] is None:
+    frame = None
+    with frame_locks[camera_id]:
+        if camera_id in latest_frames and latest_frames[camera_id] is not None:
+            frame = latest_frames[camera_id].copy()
+            
+    if frame is None:
         return jsonify({"status": "error", "message": f"Chưa có hình ảnh từ {camera_id}"}), 400
         
     # Tạo thư mục lưu nếu chưa có
@@ -199,7 +220,7 @@ def capture(camera_id):
     filename = f"{camera_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
     filepath = os.path.join(save_dir, filename)
     
-    cv2.imwrite(filepath, latest_frames[camera_id])
+    cv2.imwrite(filepath, frame)
     return jsonify({"status": "success", "message": f"Đã chụp và lưu thành công {filename}"})
 
 @app.route('/api/register_face', methods=['POST'])
