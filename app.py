@@ -165,10 +165,9 @@ def update_jetson_stats_loop():
             
         time.sleep(2.0)
 
-# Khởi chạy thread giám sát ngầm (chỉ chạy trong worker chính)
-if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
-    t = threading.Thread(target=update_jetson_stats_loop, daemon=True)
-    t.start()
+# Khởi chạy thread giám sát ngầm
+t = threading.Thread(target=update_jetson_stats_loop, daemon=True)
+t.start()
 
 # Caches và khóa tương ứng phục vụ cơ chế xử lý không đồng bộ
 latest_frames = {cam_id: None for cam_id in VIDEO_SOURCES}       # Chứa frame có vẽ khung đỏ (để phát stream)
@@ -237,11 +236,10 @@ def camera_reader_loop(camera_id):
         cap.release()
         time.sleep(1)
 
-# Khởi chạy các thread đọc camera chạy ngầm (chỉ chạy trong worker chính)
-if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
-    for cam_id in VIDEO_SOURCES:
-        t_cam = threading.Thread(target=camera_reader_loop, args=(cam_id,), daemon=True)
-        t_cam.start()
+# Khởi chạy các thread đọc camera chạy ngầm
+for cam_id in VIDEO_SOURCES:
+    t_cam = threading.Thread(target=camera_reader_loop, args=(cam_id,), daemon=True)
+    t_cam.start()
 
 def generate_frames(camera_id):
     global latest_frames
@@ -481,5 +479,5 @@ def register_face():
         return jsonify({"status": "error", "message": f"Có lỗi xảy ra: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    # Chạy Flask ở chế độ debug, lắng nghe trên 0.0.0.0 để các máy khác trong mạng LAN có thể xem
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Chạy Flask ở chế độ debug, tắt auto-reloader (use_reloader=False) để tránh xung đột cổng UDP khi load luồng camera
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
