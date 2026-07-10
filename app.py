@@ -227,63 +227,19 @@ def camera_reader_loop(camera_id):
             with clean_frame_locks[camera_id]:
                 clean_frames[camera_id] = frame.copy()
                 
-            # Nếu chưa/không sử dụng model AI phát hiện khuôn mặt, copy trực tiếp sang display cache
-            if ort_session is None:
-                with frame_locks[camera_id]:
-                    latest_frames[camera_id] = frame.copy()
+            # Copy trực tiếp sang display cache để truyền phát luồng (camera đã tự vẽ khung đỏ sẵn)
+            with frame_locks[camera_id]:
+                latest_frames[camera_id] = frame.copy()
                     
             time.sleep(0.01)
             
         cap.release()
         time.sleep(1)
 
-def face_detection_loop(camera_id):
-    global latest_frames, clean_frames
-    
-    while True:
-        if ort_session is None:
-            time.sleep(1.0)
-            continue
-            
-        # Lấy bản sao của frame sạch mới nhất để chạy nhận diện
-        frame = None
-        with clean_frame_locks[camera_id]:
-            if clean_frames[camera_id] is not None:
-                frame = clean_frames[camera_id].copy()
-                
-        if frame is None:
-            time.sleep(0.1)
-            continue
-            
-        try:
-            # Phát hiện khuôn mặt
-            face_boxes = detect_faces(frame)
-            
-            # Tạo frame hiển thị và vẽ các khung đỏ + nhãn "face"
-            display_frame = frame.copy()
-            for (x1, y1, x2, y2) in face_boxes:
-                cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                cv2.putText(display_frame, "face", (x1, max(y1 - 10, 0)), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2, cv2.LINE_AA)
-                            
-            # Cập nhật vào latest_frames phục vụ luồng truyền phát
-            with frame_locks[camera_id]:
-                latest_frames[camera_id] = display_frame
-        except Exception as e:
-            print(f"[-] Error in face detection loop for {camera_id}: {e}")
-            with frame_locks[camera_id]:
-                latest_frames[camera_id] = frame.copy()
-                
-        # Giới hạn tần suất suy luận tối đa ~10-12 FPS để tránh quá tải CPU
-        time.sleep(0.08)
-
-# Khởi chạy các thread đọc và phát hiện khuôn mặt chạy ngầm
+# Khởi chạy các thread đọc camera chạy ngầm
 for cam_id in VIDEO_SOURCES:
     t_cam = threading.Thread(target=camera_reader_loop, args=(cam_id,), daemon=True)
     t_cam.start()
-    
-    t_det = threading.Thread(target=face_detection_loop, args=(cam_id,), daemon=True)
-    t_det.start()
 
 def generate_frames(camera_id):
     global latest_frames
