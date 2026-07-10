@@ -18,8 +18,8 @@ app = Flask(__name__)
 # CẤU HÌNH CÁC NGUỒN VIDEO (HỖ TRỢ 4 CAMERA)
 # ==========================================
 VIDEO_SOURCES = {
-    "camera_1": "udp://@192.168.31.171:5005",
-    "camera_2": "udp://@192.168.31.171:5006"
+    "camera_1": "udp://@:5005?fifo_size=5000000&overrun_nonfatal=1",
+    "camera_2": "udp://@:5006?fifo_size=5000000&overrun_nonfatal=1"
 }
 
 # Lưu frame mới nhất của từng camera để chụp ảnh độc lập
