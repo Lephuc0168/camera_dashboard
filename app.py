@@ -18,12 +18,21 @@ app = Flask(__name__)
 # CẤU HÌNH CÁC NGUỒN VIDEO (HỖ TRỢ 4 CAMERA)
 # ==========================================
 VIDEO_SOURCES = {
-    "camera_1": "udp://@:5005?fifo_size=5000000&overrun_nonfatal=1",
-    "camera_2": "udp://@:5006?fifo_size=5000000&overrun_nonfatal=1"
+    "camera_1": "udp://@0.0.0.0:5005?fifo_size=5000000&overrun_nonfatal=1",
+    "camera_2": "udp://@0.0.0.0:5006?fifo_size=5000000&overrun_nonfatal=1"
 }
 
-# Lưu frame mới nhất của từng camera để chụp ảnh độc lập
-latest_frames = {cam_id: None for cam_id in VIDEO_SOURCES}
+# ==========================================
+# CẤU HÌNH KẾT NỐI JETSON API
+# ==========================================
+JETSON_API_BASE = "http://192.168.31.226:5001"
+
+# Ánh xạ camera_id trên dashboard → camera_id trên Jetson
+# (Sửa giá trị bên phải nếu Jetson dùng tên khác)
+CAMERA_JETSON_MAP = {
+    "camera_1": "camera_1",
+    "camera_2": "camera_2",
+}
 
 # Lưu trữ chỉ số Benchmark thực tế
 camera_stats = {
@@ -127,12 +136,88 @@ def detect_faces(image, conf_threshold=0.2, iou_threshold=0.45):
         print(f"[-] Inference error: {e}")
         return []
 
+def extract_faces_from_frame(frame, min_size=35, conf_threshold=0.25, margin_ratio=0.15):
+    """
+    Phát hiện và trích xuất khuôn mặt từ frame bằng mô hình ONNX local.
+    Thêm lề (margin) xung quanh khuôn mặt và lọc bỏ các box quá nhỏ (báo giả).
+    """
+    if frame is None:
+        return []
+        
+    h_orig, w_orig = frame.shape[:2]
+    boxes = detect_faces(frame, conf_threshold=conf_threshold)
+    faces = []
+    for x1, y1, x2, y2 in boxes:
+        w = x2 - x1
+        h = y2 - y1
+        if w < min_size or h < min_size:
+            continue
+            
+        margin_w = int(w * margin_ratio)
+        margin_h = int(h * margin_ratio)
+        cx1 = max(0, x1 - margin_w)
+        cy1 = max(0, y1 - margin_h)
+        cx2 = min(w_orig, x2 + margin_w)
+        cy2 = min(h_orig, y2 + margin_h)
+        
+        crop = frame[cy1:cy2, cx1:cx2]
+        if crop.size == 0:
+            continue
+            
+        ret, buffer = cv2.imencode('.jpg', crop)
+        if ret:
+            b64_str = base64.b64encode(buffer.tobytes()).decode('utf-8')
+            faces.append({
+                "data": f"data:image/jpeg;base64,{b64_str}",
+                "box": [cx1, cy1, cx2, cy2]
+            })
+    return faces
+
+def get_faces_for_camera(camera_id):
+    """
+    Lấy danh sách khuôn mặt cho camera_id:
+    1. Ưu tiên phát hiện khuôn mặt trực tiếp trên frame từ camera stream thực tế bằng ONNX local.
+    2. Nếu local không có, fallback sang Jetson API (và lọc bỏ các box nhỏ < 35x35px).
+    """
+    current_frame = None
+    with clean_frame_locks[camera_id]:
+        if camera_id in clean_frames and clean_frames[camera_id] is not None:
+            current_frame = clean_frames[camera_id].copy()
+            
+    if current_frame is None:
+        with frame_locks[camera_id]:
+            if camera_id in latest_frames and latest_frames[camera_id] is not None:
+                current_frame = latest_frames[camera_id].copy()
+                
+    # 1. Chạy phát hiện khuôn mặt trên frame hiện tại bằng ONNX local
+    if current_frame is not None:
+        faces = extract_faces_from_frame(current_frame, min_size=35, conf_threshold=0.25)
+        if len(faces) > 0:
+            return True, faces, "Local ONNX", current_frame
+            
+    # 2. Fallback sang Jetson API
+    success, raw_faces, error_msg = get_faces_from_jetson(camera_id)
+    if success and len(raw_faces) > 0:
+        valid_faces = []
+        for f in raw_faces:
+            box = f.get('box', [])
+            if len(box) == 4:
+                w = box[2] - box[0]
+                h = box[3] - box[1]
+                if w >= 35 and h >= 35:
+                    valid_faces.append(f)
+        if valid_faces:
+            return True, valid_faces, "Jetson API", current_frame
+            
+    return False, [], error_msg if error_msg else "Không phát hiện khuôn mặt nào trên luồng video", current_frame
+
+
 def update_jetson_stats_loop():
     global jetson_system_stats
     import platform
     
     # Lệnh ping thích hợp cho Windows hoặc Linux
-    ping_cmd = ["ping", "-n", "1", "192.168.31.102"] if platform.system().lower() == "windows" else ["ping", "-c", "1", "192.168.31.102"]
+    ping_cmd = ["ping", "-n", "1", "192.168.31.226"] if platform.system().lower() == "windows" else ["ping", "-c", "1", "192.168.31.226"]
     
     while True:
         # 1. Đo độ trễ ping
@@ -150,7 +235,7 @@ def update_jetson_stats_loop():
         jetson_data = {"cpu": 0, "gpu": 0, "ram": 0, "temp": 0}
         online = False
         try:
-            req = urllib.request.Request("http://192.168.31.102:5001/stats")
+            req = urllib.request.Request("http://192.168.31.226:5001/stats")
             with urllib.request.urlopen(req, timeout=1.0) as response:
                 if response.status == 200:
                     jetson_data = json.loads(response.read().decode('utf-8'))
@@ -165,9 +250,6 @@ def update_jetson_stats_loop():
             
         time.sleep(2.0)
 
-# Khởi chạy thread giám sát ngầm
-t = threading.Thread(target=update_jetson_stats_loop, daemon=True)
-t.start()
 
 # Caches và khóa tương ứng phục vụ cơ chế xử lý không đồng bộ
 latest_frames = {cam_id: None for cam_id in VIDEO_SOURCES}       # Chứa frame có vẽ khung đỏ (để phát stream)
@@ -189,11 +271,11 @@ def camera_reader_loop(camera_id):
         cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
         
         if not cap.isOpened():
-            print(f"[-] Background: Failed to connect to {camera_id}. Retrying in 2s...")
+            print(f"[-] Background: Failed to connect to {camera_id}. Retrying in 5s...")
             with stats_lock:
                 camera_stats[camera_id]["status"] = "Offline"
             cap.release()
-            time.sleep(2)
+            time.sleep(5)
             continue
             
         print(f"[+] Background: Successfully connected to {camera_id}!")
@@ -201,16 +283,22 @@ def camera_reader_loop(camera_id):
         # Biến tính toán FPS thực tế
         fps_start_time = time.time()
         fps_counter = 0
+        last_success_time = time.time()
         
         while True:
             success, frame = cap.read()
             if not success:
-                print(f"[-] Background: Disconnected or lost stream from {camera_id}. Reconnecting...")
-                with stats_lock:
-                    camera_stats[camera_id]["status"] = "Offline"
-                    camera_stats[camera_id]["fps"] = 0
-                break
+                # Nếu đã quá 10 giây không có frame nào thành công, mới coi là mất kết nối
+                if time.time() - last_success_time > 10.0:
+                    print(f"[-] Background: Disconnected or lost stream from {camera_id} (no successful frame for 10s). Reconnecting...")
+                    with stats_lock:
+                        camera_stats[camera_id]["status"] = "Offline"
+                        camera_stats[camera_id]["fps"] = 0
+                    break
+                time.sleep(0.01)
+                continue
                 
+            last_success_time = time.time()
             fps_counter += 1
             elapsed = time.time() - fps_start_time
             if elapsed >= 1.0:
@@ -234,12 +322,9 @@ def camera_reader_loop(camera_id):
             time.sleep(0.01)
             
         cap.release()
-        time.sleep(1)
+        print(f"[*] Background: Released capture for {camera_id}. Waiting 5s before reconnecting...")
+        time.sleep(5)
 
-# Khởi chạy các thread đọc camera chạy ngầm
-for cam_id in VIDEO_SOURCES:
-    t_cam = threading.Thread(target=camera_reader_loop, args=(cam_id,), daemon=True)
-    t_cam.start()
 
 def generate_frames(camera_id):
     global latest_frames
@@ -294,84 +379,86 @@ def capture_default():
     # Mặc định chụp camera 1
     return capture("camera_1")
 
+@app.route('/capture', methods=['POST'])
+def capture_default():
+    # Mặc định chụp camera 1
+    return capture("camera_1")
+
 @app.route('/capture/<camera_id>', methods=['POST'])
 def capture(camera_id):
-    global clean_frames
-    clean_frame = None
-    with clean_frame_locks[camera_id]:
-        if camera_id in clean_frames and clean_frames[camera_id] is not None:
-            clean_frame = clean_frames[camera_id].copy()
-            
-    if clean_frame is None:
-        return jsonify({"status": "error", "message": f"Chưa có hình ảnh từ {camera_id}"}), 400
-        
-    # Tạo thư mục lưu nếu chưa có
+    if camera_id not in VIDEO_SOURCES:
+        return jsonify({"status": "error", "message": f"Camera {camera_id} không tồn tại"}), 404
+
     save_dir = os.path.join('static', 'captures')
     os.makedirs(save_dir, exist_ok=True)
-    
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    # Thực hiện phát hiện khuôn mặt bằng model ONNX để cắt ảnh
-    face_boxes = detect_faces(clean_frame)
+    success, faces, source_msg, current_frame = get_faces_for_camera(camera_id)
     
-    if len(face_boxes) > 0:
+    if success and len(faces) > 0:
         saved_files = []
-        for idx, (x1, y1, x2, y2) in enumerate(face_boxes):
-            # Cắt lấy riêng vùng khuôn mặt từ frame sạch
-            face_img = clean_frame[y1:y2, x1:x2]
+        for idx, face in enumerate(faces):
+            img_data = face.get('data', '')
+            if ',' in img_data:
+                img_data = img_data.split(',')[1]
+            if not img_data:
+                continue
+            decoded = base64.b64decode(img_data)
+            nparr = np.frombuffer(decoded, np.uint8)
+            face_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
-            filename = f"face_{camera_id}_{timestamp}_{idx + 1}.jpg"
-            filepath = os.path.join(save_dir, filename)
-            cv2.imwrite(filepath, face_img)
-            saved_files.append(filename)
+            if face_img is not None:
+                filename = f"face_{camera_id}_{timestamp}_{idx + 1}.jpg"
+                filepath = os.path.join(save_dir, filename)
+                cv2.imwrite(filepath, face_img)
+                saved_files.append(filename)
+        
+        if saved_files:
+            return jsonify({
+                "status": "success",
+                "message": f"Đã phát hiện và lưu thành công {len(saved_files)} khuôn mặt!",
+                "filename": saved_files[0],
+                "faces_count": len(saved_files)
+            })
             
-        msg = f"Đã phát hiện và chụp/lưu thành công {len(saved_files)} khuôn mặt!"
-        return jsonify({
-            "status": "success", 
-            "message": msg,
-            "filename": saved_files[0],
-            "faces_count": len(saved_files)
-        })
-    else:
-        # Fallback: Nếu không phát hiện thấy khuôn mặt nào, chụp lại toàn bộ camera để tránh lỗi luồng
-        filename = f"full_{camera_id}_{timestamp}.jpg"
-        filepath = os.path.join(save_dir, filename)
-        cv2.imwrite(filepath, clean_frame)
-        return jsonify({
-            "status": "success", 
-            "message": f"Không tìm thấy khuôn mặt, đã chụp toàn bộ khung hình: {filename}",
-            "filename": filename,
-            "faces_count": 0
-        })
+    # Fallback chụp toàn bộ frame
+    if current_frame is None:
+        return jsonify({"status": "error", "message": f"Chưa có hình ảnh từ {camera_id}"}), 400
+        
+    filename = f"full_{camera_id}_{timestamp}.jpg"
+    filepath = os.path.join(save_dir, filename)
+    cv2.imwrite(filepath, current_frame)
+    return jsonify({
+        "status": "success",
+        "message": f"Không phát hiện khuôn mặt. Đã chụp toàn bộ khung hình: {filename}",
+        "filename": filename,
+        "faces_count": 0
+    })
 
 @app.route('/api/capture_preview/<camera_id>', methods=['POST'])
 def capture_preview(camera_id):
-    global clean_frames
-    clean_frame = None
-    with clean_frame_locks[camera_id]:
-        if camera_id in clean_frames and clean_frames[camera_id] is not None:
-            clean_frame = clean_frames[camera_id].copy()
-            
-    if clean_frame is None:
-        return jsonify({"status": "error", "message": f"Chưa có hình ảnh từ {camera_id}"}), 400
-        
-    face_boxes = detect_faces(clean_frame)
+    if camera_id not in VIDEO_SOURCES:
+        return jsonify({"status": "error", "message": f"Camera {camera_id} không tồn tại"}), 404
+
+    success, faces, source_msg, current_frame = get_faces_for_camera(camera_id)
     images_to_return = []
     
-    if len(face_boxes) > 0:
-        for idx, (x1, y1, x2, y2) in enumerate(face_boxes):
-            face_img = clean_frame[y1:y2, x1:x2]
-            ret, buffer = cv2.imencode('.jpg', face_img)
-            if ret:
-                base64_str = base64.b64encode(buffer.tobytes()).decode('utf-8')
+    if success and len(faces) > 0:
+        for idx, face in enumerate(faces):
+            img_data = face.get('data', '')
+            if img_data:
                 images_to_return.append({
                     "type": "face",
-                    "data": f"data:image/jpeg;base64,{base64_str}",
+                    "data": img_data,
                     "label": f"Khuôn mặt {idx + 1}"
                 })
-    else:
-        # Fallback: Chụp toàn bộ khung hình
-        ret, buffer = cv2.imencode('.jpg', clean_frame)
+                
+    if not images_to_return:
+        # Fallback: không có khuôn mặt -> chụp toàn bộ frame hiện tại
+        if current_frame is None:
+            return jsonify({"status": "error", "message": f"Chưa nhận được hình ảnh từ {camera_id}"}), 400
+            
+        ret, buffer = cv2.imencode('.jpg', current_frame)
         if ret:
             base64_str = base64.b64encode(buffer.tobytes()).decode('utf-8')
             images_to_return.append({
@@ -381,7 +468,7 @@ def capture_preview(camera_id):
             })
             
     if not images_to_return:
-        return jsonify({"status": "error", "message": "Lỗi mã hóa hình ảnh preview"}), 500
+        return jsonify({"status": "error", "message": "Lỗi xử lý hình ảnh"}), 500
         
     return jsonify({
         "status": "success",
@@ -396,45 +483,49 @@ def save_captured_images():
         if not data or 'images' not in data or 'camera_id' not in data:
             return jsonify({"status": "error", "message": "Dữ liệu không đầy đủ"}), 400
             
-        camera_id = data['camera_id']
-        images = data['images']
-        
         save_dir = os.path.join('static', 'captures')
         os.makedirs(save_dir, exist_ok=True)
-        
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        saved_count = 0
+        camera_id = data.get('camera_id', 'camera_1')
         
-        for idx, img_obj in enumerate(images):
+        saved_count = 0
+        for idx, img_obj in enumerate(data.get('images', [])):
             img_data = img_obj.get('data', '')
-            img_type = img_obj.get('type', 'face')
-            
             if ',' in img_data:
                 img_data = img_data.split(',')[1]
-                
-            decoded_img = base64.b64decode(img_data)
-            
-            # Khôi phục thành numpy array để lưu bằng OpenCV
-            nparr = np.frombuffer(decoded_img, np.uint8)
+            if not img_data:
+                continue
+            decoded = base64.b64decode(img_data)
+            nparr = np.frombuffer(decoded, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            
             if img is not None:
-                prefix = "face" if img_type == "face" else "full"
-                filename = f"{prefix}_{camera_id}_{timestamp}_{idx + 1}.jpg"
+                img_type = img_obj.get('type', 'face')
+                label = img_obj.get('label', 'Unknown').replace(' ', '_')
+                filename = f"{img_type}_{camera_id}_{label}_{timestamp}_{idx+1}.jpg"
                 filepath = os.path.join(save_dir, filename)
                 cv2.imwrite(filepath, img)
                 saved_count += 1
                 
-        if saved_count > 0:
-            return jsonify({
-                "status": "success",
-                "message": f"Đã lưu thành công {saved_count} hình ảnh vào thư mục captures!"
-            })
-        else:
-            return jsonify({"status": "error", "message": "Không thể lưu hình ảnh nào"}), 400
+        # Đồng thời gửi sang Jetson API nếu Jetson API khả dụng
+        try:
+            req = urllib.request.Request(
+                f"{JETSON_API_BASE}/api/save",
+                data=json.dumps(data).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST'
+            )
+            with urllib.request.urlopen(req, timeout=3.0) as response:
+                pass
+        except Exception as e:
+            print(f"[API] Warning: Jetson save API not reachable: {e}")
             
+        return jsonify({
+            "status": "success",
+            "message": f"Đã lưu thành công {saved_count} hình ảnh!"
+        })
     except Exception as e:
-        return jsonify({"status": "error", "message": f"Lỗi lưu ảnh: {str(e)}"}), 500
+        print(f"[API] Error saving images: {e}")
+        return jsonify({"status": "error", "message": f"Lỗi server: {e}"}), 500
 
 @app.route('/api/register_face', methods=['POST'])
 def register_face():
@@ -479,5 +570,14 @@ def register_face():
         return jsonify({"status": "error", "message": f"Có lỗi xảy ra: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    # Chạy Flask ở chế độ debug, tắt auto-reloader (use_reloader=False) để tránh xung đột cổng UDP khi load luồng camera
+    # Khởi chạy thread giám sát ngầm
+    t = threading.Thread(target=update_jetson_stats_loop, daemon=True)
+    t.start()
+
+    # Khởi chạy các thread đọc camera chạy ngầm
+    for cam_id in VIDEO_SOURCES:
+        t_cam = threading.Thread(target=camera_reader_loop, args=(cam_id,), daemon=True)
+        t_cam.start()
+
+    # Chạy Flask ở chế độ debug, lắng nghe trên 0.0.0.0, tắt auto-reloader (use_reloader=False) để tránh xung đột cổng UDP
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
