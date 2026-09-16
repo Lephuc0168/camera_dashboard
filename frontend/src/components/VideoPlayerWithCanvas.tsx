@@ -14,13 +14,17 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
   fps = 30.0
 }) => {
   const [activeCam, setActiveCam] = useState<'camera_1' | 'camera_2'>('camera_1');
+  const [streamMode, setStreamMode] = useState<'direct' | 'proxy'>('direct');
   const [streamError, setStreamError] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const safeFps = typeof fps === 'number' && !isNaN(fps) ? fps : 30.0;
   const jetsonIp = localStorage.getItem('custom_backend_ip')?.split(':')[0] || '10.39.4.131';
-  const streamUrl = `http://${jetsonIp}:5001/video_feed/${activeCam}`;
+  
+  const directStreamUrl = `http://${jetsonIp}:5001/video_feed/${activeCam}`;
+  const proxyStreamUrl = `http://${jetsonIp}:8000/api/cameras/stream/${activeCam}`;
+  const streamUrl = streamMode === 'direct' ? directStreamUrl : proxyStreamUrl;
 
   // Reset stream error on camera switch
   const handleSwitchCam = (cam: 'camera_1' | 'camera_2') => {
@@ -28,12 +32,23 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
     setStreamError(false);
   };
 
-  // Periodic retry to reconnect camera stream
+  const handleStreamError = () => {
+    // If direct port 5001 fails, auto-fallback to FastAPI proxy on port 8000
+    if (streamMode === 'direct') {
+      console.warn(`[Stream] Direct stream at ${directStreamUrl} failed. Falling back to FastAPI proxy: ${proxyStreamUrl}`);
+      setStreamMode('proxy');
+      setStreamError(false);
+    } else {
+      setStreamError(true);
+    }
+  };
+
+  // Periodic retry to reconnect camera stream if errored
   useEffect(() => {
     if (streamError) {
       const timer = setTimeout(() => {
         setStreamError(false);
-      }, 3000);
+      }, 4000);
       return () => clearTimeout(timer);
     }
   }, [streamError]);
@@ -158,9 +173,57 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
           </button>
         </div>
 
-        <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-          Active feed: <code>{streamUrl}</code>
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Stream Mode Toggle: Direct :5001 vs Proxy :8000 */}
+          <div style={{
+            display: 'flex',
+            background: 'rgba(255, 255, 255, 0.05)',
+            borderRadius: '16px',
+            padding: '2px',
+            border: '1px solid var(--border-glass)'
+          }}>
+            <button
+              type="button"
+              onClick={() => { setStreamMode('direct'); setStreamError(false); }}
+              style={{
+                padding: '4px 10px',
+                borderRadius: '14px',
+                border: 'none',
+                background: streamMode === 'direct' ? 'rgba(99, 102, 241, 0.3)' : 'transparent',
+                color: streamMode === 'direct' ? '#a5b4fc' : 'var(--text-dim)',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              title="Kết nối trực tiếp Flask Face API trên port 5001"
+            >
+              Direct :5001
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStreamMode('proxy'); setStreamError(false); }}
+              style={{
+                padding: '4px 10px',
+                borderRadius: '14px',
+                border: 'none',
+                background: streamMode === 'proxy' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+                color: streamMode === 'proxy' ? '#6ee7b7' : 'var(--text-dim)',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              title="Truyền qua FastAPI Proxy trên port 8000 (ổn định khi bị chặn tường lửa LAN)"
+            >
+              Proxy :8000
+            </button>
+          </div>
+
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+            Feed: <code>{streamUrl}</code>
+          </span>
+        </div>
       </div>
 
       {/* Main Video Viewport */}
@@ -201,9 +264,30 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
           <h4 style={{ color: '#f8fafc', fontSize: '1.05rem', fontWeight: 600, marginBottom: '6px' }}>
             {isCam0 ? 'Jetson CSI Camera (Cam 0)' : 'Network RTSP Camera (Cam 1)'}
           </h4>
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center', maxWidth: '420px' }}>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center', maxWidth: '440px' }}>
             Connecting to <code>{streamUrl}</code>
           </p>
+
+          {streamError && (
+            <div style={{
+              marginTop: '12px',
+              padding: '10px 16px',
+              background: 'rgba(239, 68, 68, 0.15)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '8px',
+              color: '#fca5a5',
+              fontSize: '0.8rem',
+              textAlign: 'center',
+              maxWidth: '440px'
+            }}>
+              <div style={{ fontWeight: 600 }}>Chưa nhận được tín hiệu hình ảnh ({streamMode === 'direct' ? 'Port 5001' : 'FastAPI Proxy Port 8000'})</div>
+              <div style={{ marginTop: '4px', fontSize: '0.74rem', color: '#e2e8f0' }}>
+                {streamMode === 'direct'
+                  ? 'Gợi ý: Click nút "Proxy :8000" ở trên hoặc kiểm tra lệnh "sudo ufw allow 5001/tcp" trên Jetson'
+                  : 'Gợi ý: Click nút "Direct :5001" hoặc pull code backend mới trên Jetson'}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Live Video Feed Image */}
@@ -212,7 +296,7 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
             key={streamUrl}
             src={streamUrl}
             alt={isCam0 ? 'Live CSI Camera Feed' : 'Live RTSP Camera Feed'}
-            onError={() => setStreamError(true)}
+            onError={handleStreamError}
             style={{
               position: 'absolute',
               inset: 0,
