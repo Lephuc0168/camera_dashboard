@@ -18,15 +18,24 @@ except ImportError:
     os.system("pip3 install psycopg2-binary")
     import psycopg2
 
-DB_URL = os.getenv("DATABASE_URL", "postgresql://open_set_fr:open_set_fr_pass@localhost:5432/open_set_fr")
-
 CANDIDATE_PATHS = [
     "thresholds/threshold_table.json",
     "threshold_table.json",
     os.path.expanduser("~/open-set-face-recognition/thresholds/threshold_table.json"),
     "/home/jetson/open-set-face-recognition/thresholds/threshold_table.json",
     os.path.expanduser("~/camera_dashboard/thresholds/threshold_table.json"),
+    os.path.expanduser("~/dt/thresholds/threshold_table.json"),
     "/data/thresholds/threshold_table.json",
+]
+
+CANDIDATE_DBS = [
+    os.getenv("DATABASE_URL"),
+    "postgresql://open_set_fr:open_set_fr_pass@localhost:5432/open_set_fr",
+    "postgresql://open_set_fr:nckh%402026@localhost:5432/open_set_fr",
+    "postgresql://open_set_fr:open_set_fr@localhost:5432/open_set_fr",
+    "postgresql://open_set_fr:admin@localhost:5432/open_set_fr",
+    "dbname=open_set_fr user=postgres",
+    "dbname=open_set_fr",
 ]
 
 
@@ -43,6 +52,19 @@ def find_threshold_file(user_path=None):
             return exp
 
     return None
+
+
+def connect_db():
+    for db_conn_str in CANDIDATE_DBS:
+        if not db_conn_str:
+            continue
+        try:
+            conn = psycopg2.connect(db_conn_str)
+            return conn, db_conn_str
+        except Exception:
+            continue
+
+    return None, None
 
 
 def main():
@@ -70,7 +92,15 @@ def main():
 
     # Connect to database
     print(f"\n[2/4] Đang kết nối tới PostgreSQL (open_set_fr)...")
-    conn = psycopg2.connect(DB_URL)
+    conn, used_conn_str = connect_db()
+
+    if not conn:
+        print("\n[ERROR] Không thể xác thực mật khẩu vào PostgreSQL Database!")
+        print("\nĐể đồng bộ mật khẩu database trong 5 giây, hãy chạy lệnh này:")
+        print("  sudo -u postgres psql -c \"ALTER USER open_set_fr WITH PASSWORD 'open_set_fr_pass';\"")
+        print("\nSau đó chạy lại script import này là thành công 100%!\n")
+        sys.exit(1)
+
     cur = conn.cursor()
 
     # 1. Tạo bảng identity_thresholds theo đúng Spec 13.6
