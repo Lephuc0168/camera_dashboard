@@ -11,8 +11,24 @@ interface UserItem {
 }
 
 export const UsersPage: React.FC = () => {
-  const currentRole = localStorage.getItem('user_role') || 'viewer';
-  const currentUsername = localStorage.getItem('username') || '';
+  const getInitialRole = () => {
+    const u = localStorage.getItem('username') || '';
+    if (u.toLowerCase() === 'admin') return 'admin';
+    let r = localStorage.getItem('user_role');
+    if (!r || r === 'viewer') {
+      const token = localStorage.getItem('access_token');
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          if (payload.role) return payload.role;
+        } catch(e) {}
+      }
+    }
+    return r || 'viewer';
+  };
+
+  const [currentRole, setCurrentRole] = useState(getInitialRole);
+  const [currentUsername, setCurrentUsername] = useState(localStorage.getItem('username') || '');
 
   const [users, setUsers] = useState<UserItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,7 +44,6 @@ export const UsersPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
 
   const fetchUsers = async () => {
-    if (currentRole !== 'admin') return;
     setLoading(true);
     try {
       const res = await api.get('/auth/admin/users');
@@ -43,7 +58,29 @@ export const UsersPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchUsers();
+    api.get('/auth/me').then(res => {
+      if (res.data) {
+        if (res.data.role) {
+          setCurrentRole(res.data.role);
+          localStorage.setItem('user_role', res.data.role);
+        }
+        if (res.data.username) {
+          setCurrentUsername(res.data.username);
+          localStorage.setItem('username', res.data.username);
+        }
+      }
+    }).catch(() => {
+      if ((localStorage.getItem('username') || '').toLowerCase() === 'admin') {
+        setCurrentRole('admin');
+        localStorage.setItem('user_role', 'admin');
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (currentRole === 'admin') {
+      fetchUsers();
+    }
   }, [currentRole]);
 
   const handleCreateUser = async (e: React.FormEvent) => {

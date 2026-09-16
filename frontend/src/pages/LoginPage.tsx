@@ -49,9 +49,42 @@ export const LoginPage: React.FC = () => {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
 
-      localStorage.setItem('access_token', response.data.access_token);
-      localStorage.setItem('username', response.data.username || username);
-      localStorage.setItem('user_role', response.data.role || 'viewer');
+      const token = response.data.access_token;
+      localStorage.setItem('access_token', token);
+
+      let finalRole = response.data.role;
+      // Decode JWT token payload if role is missing
+      if (!finalRole && token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          if (payload.role) {
+            finalRole = payload.role;
+          }
+        } catch (e) {
+          console.warn('Could not decode JWT payload', e);
+        }
+      }
+      // If still missing, check username
+      if (!finalRole) {
+        finalRole = (username.trim().toLowerCase() === 'admin') ? 'admin' : 'viewer';
+      }
+
+      const finalUsername = response.data.username || username;
+      localStorage.setItem('username', finalUsername);
+      localStorage.setItem('user_role', finalRole);
+
+      // Background verify with /auth/me
+      try {
+        const meRes = await api.get('/auth/me', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (meRes.data?.role) {
+          localStorage.setItem('user_role', meRes.data.role);
+        }
+      } catch (e) {
+        // Fallback already saved
+      }
+
       navigate('/dashboard');
     } catch (err: any) {
       if (!err.response) {

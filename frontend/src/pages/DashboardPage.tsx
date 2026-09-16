@@ -10,7 +10,24 @@ import { UserCheck, UserX, AlertTriangle, Cpu, RefreshCw, Activity, HardDrive, T
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
-  const userRole = localStorage.getItem('user_role') || 'viewer';
+
+  const getInitialRole = () => {
+    const u = localStorage.getItem('username') || '';
+    if (u.toLowerCase() === 'admin') return 'admin';
+    let r = localStorage.getItem('user_role');
+    if (!r || r === 'viewer') {
+      const token = localStorage.getItem('access_token');
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          if (payload.role) return payload.role;
+        } catch(e) {}
+      }
+    }
+    return r || 'viewer';
+  };
+
+  const [userRole, setUserRole] = useState(getInitialRole);
 
   const [stats, setStats] = useState<StatsSummary | null>(null);
   const [recentEvents, setRecentEvents] = useState<RecognitionEvent[]>([]);
@@ -45,6 +62,19 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     fetchDashboardData();
+
+    // Verify and sync role from /auth/me
+    api.get('/auth/me').then(res => {
+      if (res.data?.role) {
+        setUserRole(res.data.role);
+        localStorage.setItem('user_role', res.data.role);
+      }
+    }).catch(() => {
+      if ((localStorage.getItem('username') || '').toLowerCase() === 'admin') {
+        setUserRole('admin');
+        localStorage.setItem('user_role', 'admin');
+      }
+    });
 
     // Auto-refresh events & stats every 4 seconds
     const interval = setInterval(fetchDashboardData, 4000);

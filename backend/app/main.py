@@ -63,6 +63,10 @@ def on_startup():
             )
             db.add(admin)
             db.commit()
+        elif admin_user.role != "admin":
+            logger.info("Enforcing role='admin' for default admin user...")
+            admin_user.role = "admin"
+            db.commit()
             
         # Seed default Camera if not exists
         default_cam = db.query(Camera).filter(Camera.camera_code == "camera_01").first()

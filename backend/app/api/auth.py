@@ -23,6 +23,12 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user account")
     
+    # Đảm bảo tài khoản admin luôn sở hữu vai trò admin cao nhất
+    if user.username.lower() == "admin" and user.role != "admin":
+        user.role = "admin"
+        db.commit()
+        db.refresh(user)
+    
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.username, "role": user.role},

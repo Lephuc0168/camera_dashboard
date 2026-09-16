@@ -1,11 +1,49 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
+import { api } from '../services/api';
 import { LayoutDashboard, Sliders, History, Users, Camera, LogOut, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const navigate = useNavigate();
-  const username = localStorage.getItem('username') || 'Operator';
-  const userRole = localStorage.getItem('user_role') || 'viewer';
+
+  const getInitialRole = () => {
+    const u = localStorage.getItem('username') || '';
+    if (u.toLowerCase() === 'admin') return 'admin';
+    let r = localStorage.getItem('user_role');
+    if (!r || r === 'viewer') {
+      const token = localStorage.getItem('access_token');
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          if (payload.role) return payload.role;
+        } catch(e) {}
+      }
+    }
+    return r || 'viewer';
+  };
+
+  const [username, setUsername] = useState(localStorage.getItem('username') || 'Operator');
+  const [userRole, setUserRole] = useState(getInitialRole);
+
+  useEffect(() => {
+    api.get('/auth/me').then(res => {
+      if (res.data) {
+        if (res.data.role) {
+          setUserRole(res.data.role);
+          localStorage.setItem('user_role', res.data.role);
+        }
+        if (res.data.username) {
+          setUsername(res.data.username);
+          localStorage.setItem('username', res.data.username);
+        }
+      }
+    }).catch(() => {
+      if ((localStorage.getItem('username') || '').toLowerCase() === 'admin') {
+        setUserRole('admin');
+        localStorage.setItem('user_role', 'admin');
+      }
+    });
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
