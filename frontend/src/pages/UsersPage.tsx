@@ -131,10 +131,10 @@ export const UsersPage: React.FC = () => {
 
     try {
       await api.delete(`/auth/admin/users/${userId}`);
-      setSuccess(`Đã xóa tài khoản "${username}" thành công.`);
+      setSuccess(`User account "${username}" deleted successfully.`);
       fetchUsers();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Không thể xóa tài khoản.');
+      setError(err.response?.data?.detail || 'Failed to delete user account.');
     }
   };
 
@@ -151,10 +151,10 @@ export const UsersPage: React.FC = () => {
         }}>
           <AlertTriangle size={48} color="#f43f5e" style={{ margin: '0 auto 16px' }} />
           <h2 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f43f5e', marginBottom: '8px' }}>
-            Truy Cập Bị Giới Hạn (403 Forbidden)
+            Access Restricted (403 Forbidden)
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', lineHeight: 1.5 }}>
-            Khu vực này chỉ dành riêng cho tài khoản có vai trò <strong>Admin (Quản trị viên)</strong> để quản lý và khởi tạo tài khoản với 3 vai trò (Admin, Operator, Viewer).
+            This console is restricted to users with the <strong>Admin</strong> role. Please log in with an administrator account to manage system users.
           </p>
         </div>
       </div>
@@ -168,10 +168,10 @@ export const UsersPage: React.FC = () => {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
             <ShieldCheck size={26} color="#818cf8" />
-            <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>Quản Trị Người Dùng & Phân Quyền (RBAC)</h1>
+            <h1 style={{ fontSize: '1.75rem', fontWeight: 700 }}>User Management & RBAC</h1>
           </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            Đặc quyền Quản trị viên: Khởi tạo, xem danh sách và phân quyền 3 vai trò (Admin, Operator, Viewer)
+            Admin Console: Provision, inspect, and manage system user accounts across all 3 roles (Admin, Operator, Viewer)
           </p>
         </div>
 
@@ -181,7 +181,7 @@ export const UsersPage: React.FC = () => {
             className="glass-button"
             style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'white', border: '1px solid var(--border-glass)' }}
           >
-            <RefreshCw size={16} /> Làm mới
+            <RefreshCw size={16} /> Refresh
           </button>
           <button
             onClick={() => setShowForm(!showForm)}
@@ -193,7 +193,7 @@ export const UsersPage: React.FC = () => {
               padding: '10px 18px'
             }}
           >
-            <UserPlus size={18} /> {showForm ? 'Đóng Form' : '+ Tạo Tài Khoản Mới'}
+            <UserPlus size={18} /> {showForm ? 'Close' : '+ Create User'}
           </button>
         </div>
       </div>
@@ -235,19 +235,19 @@ export const UsersPage: React.FC = () => {
         <div className="glass-panel" style={{ padding: '24px', marginBottom: '24px', border: '1px solid rgba(99, 102, 241, 0.4)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
             <UserPlus size={20} color="#818cf8" />
-            <h3 style={{ fontSize: '1.15rem', fontWeight: 600 }}>Tạo Tài Khoản Mới (Hỗ trợ cả 3 vai trò)</h3>
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 600 }}>Create New User Account (3 Roles Supported)</h3>
           </div>
 
           <form onSubmit={handleCreateUser} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', alignItems: 'flex-end' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                Tên đăng nhập
+                Username
               </label>
               <div style={{ position: 'relative' }}>
                 <User size={16} color="var(--text-dim)" style={{ position: 'absolute', left: '10px', top: '12px' }} />
                 <input
                   type="text"
-                  placeholder="VD: operator_station1"
+                  placeholder="e.g. operator_01"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
                   required
@@ -266,7 +266,7 @@ export const UsersPage: React.FC = () => {
 
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                Vai trò (Role)
+                Role
               </label>
               <select
                 value={newRole}
@@ -281,15 +281,15 @@ export const UsersPage: React.FC = () => {
                   outline: 'none'
                 }}
               >
-                <option value="operator">Operator (Vận hành viên - Xem & Điều khiển)</option>
-                <option value="admin">Admin (Quản trị viên - Toàn quyền)</option>
-                <option value="viewer">Viewer (Khách xem - Chỉ xem live stream)</option>
+                <option value="operator">Operator (View & Control)</option>
+                <option value="admin">Admin (Full Administrative Access)</option>
+                <option value="viewer">Viewer (Read-only Stream)</option>
               </select>
             </div>
 
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                Mật khẩu (Tối thiểu 6 ký tự)
+                Password (Min 6 characters)
               </label>
               <div style={{ position: 'relative' }}>
                 <Lock size={16} color="var(--text-dim)" style={{ position: 'absolute', left: '10px', top: '12px' }} />
@@ -314,7 +314,7 @@ export const UsersPage: React.FC = () => {
 
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                Xác nhận mật khẩu
+                Confirm Password
               </label>
               <div style={{ position: 'relative' }}>
                 <Lock size={16} color="var(--text-dim)" style={{ position: 'absolute', left: '10px', top: '12px' }} />
@@ -350,7 +350,7 @@ export const UsersPage: React.FC = () => {
                   color: 'white'
                 }}
               >
-                {submitting ? 'Đang khởi tạo...' : 'Xác Nhận Tạo Tài Khoản'}
+                {submitting ? 'Creating...' : 'Create Account'}
               </button>
             </div>
           </form>
@@ -361,18 +361,18 @@ export const UsersPage: React.FC = () => {
       <div className="glass-panel" style={{ padding: '24px' }}>
         <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Shield size={18} color="var(--accent-cyan)" />
-          Danh Sách Tài Khoản Hệ Thống ({users.length})
+          System Accounts ({users.length})
         </h3>
 
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.9rem' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-glass)', color: 'var(--text-dim)' }}>
-                <th style={{ padding: '12px' }}>Tên người dùng</th>
-                <th style={{ padding: '12px' }}>Vai trò (Role)</th>
-                <th style={{ padding: '12px' }}>Trạng thái</th>
-                <th style={{ padding: '12px' }}>Ngày tạo</th>
-                <th style={{ padding: '12px', textAlign: 'center' }}>Thao tác</th>
+                <th style={{ padding: '12px' }}>Username</th>
+                <th style={{ padding: '12px' }}>Role</th>
+                <th style={{ padding: '12px' }}>Status</th>
+                <th style={{ padding: '12px' }}>Created At</th>
+                <th style={{ padding: '12px', textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -391,7 +391,7 @@ export const UsersPage: React.FC = () => {
                 return (
                   <tr key={u.user_id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
                     <td style={{ padding: '14px 12px', fontWeight: 600, color: 'white' }}>
-                      {u.username} {isSelf && <span style={{ fontSize: '0.75rem', color: '#10b981', marginLeft: '6px' }}>(Bạn)</span>}
+                      {u.username} {isSelf && <span style={{ fontSize: '0.75rem', color: '#10b981', marginLeft: '6px' }}>(You)</span>}
                     </td>
                     <td style={{ padding: '14px 12px' }}>
                       <span style={{
@@ -410,11 +410,11 @@ export const UsersPage: React.FC = () => {
                     <td style={{ padding: '14px 12px' }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: u.is_active ? '#10b981' : '#f43f5e', fontSize: '0.85rem' }}>
                         <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: u.is_active ? '#10b981' : '#f43f5e' }}></span>
-                        {u.is_active ? 'Hoạt động' : 'Đã khóa'}
+                        {u.is_active ? 'Active' : 'Disabled'}
                       </span>
                     </td>
                     <td style={{ padding: '14px 12px', color: 'var(--text-muted)' }}>
-                      {new Date(u.created_at).toLocaleString('vi-VN')}
+                      {new Date(u.created_at).toLocaleString()}
                     </td>
                     <td style={{ padding: '14px 12px', textAlign: 'center' }}>
                       {!isSelf ? (
@@ -433,10 +433,10 @@ export const UsersPage: React.FC = () => {
                             fontSize: '0.82rem'
                           }}
                         >
-                          <Trash2 size={14} /> Xóa
+                          <Trash2 size={14} /> Delete
                         </button>
                       ) : (
-                        <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>Mặc định</span>
+                        <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>Default (Protected)</span>
                       )}
                     </td>
                   </tr>
@@ -445,7 +445,7 @@ export const UsersPage: React.FC = () => {
               {users.length === 0 && !loading && (
                 <tr>
                   <td colSpan={5} style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                    Chưa có tài khoản nào khác trong hệ thống.
+                    No other user accounts found.
                   </td>
                 </tr>
               )}

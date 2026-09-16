@@ -101,7 +101,7 @@ export const Navbar: React.FC = () => {
         </NavLink>
         {userRole === 'admin' && (
           <NavLink to="/users" style={({ isActive }) => navLinkStyle(isActive)}>
-            <ShieldCheck size={18} /> Quản lý tài khoản
+            <ShieldCheck size={18} /> User Management
           </NavLink>
         )}
       </nav>
