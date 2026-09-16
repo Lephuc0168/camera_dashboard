@@ -51,7 +51,23 @@ export const UsersPage: React.FC = () => {
       setError(null);
     } catch (err: any) {
       console.error('Failed to load users:', err);
-      setError(err.response?.data?.detail || 'Không thể tải danh sách tài khoản.');
+      if (err.response?.status === 404) {
+        setError('Backend API (/auth/admin/users) is not updated yet. Run "git pull" on Jetson to sync backend.');
+      } else {
+        setError(err.response?.data?.detail || 'Failed to load user accounts.');
+      }
+      // Graceful fallback: always display current logged-in admin user
+      if (currentRole === 'admin') {
+        setUsers([
+          {
+            user_id: 'current-admin-id',
+            username: currentUsername || 'admin',
+            role: 'admin',
+            is_active: true,
+            created_at: new Date().toISOString()
+          }
+        ]);
+      }
     } finally {
       setLoading(false);
     }
