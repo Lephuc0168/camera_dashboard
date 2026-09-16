@@ -1,18 +1,26 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { api } from '../services/api';
 import { IdentityThreshold } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
-import { Sliders, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Sliders, ShieldCheck, AlertCircle, Upload, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 export const ThresholdsPage: React.FC = () => {
   const [thresholds, setThresholds] = useState<IdentityThreshold[]>([]);
   const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isAdmin = 
+    (localStorage.getItem('user_role') === 'admin') || 
+    ((localStorage.getItem('username') || '').toLowerCase() === 'admin');
 
   const fetchThresholds = async () => {
     try {
+      setLoading(true);
       const response = await api.get('/thresholds');
       setThresholds(response.data);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch thresholds:', err);
     } finally {
       setLoading(false);
@@ -23,14 +31,113 @@ export const ThresholdsPage: React.FC = () => {
     fetchThresholds();
   }, []);
 
+  const handleImportFromJetson = async () => {
+    try {
+      setImporting(true);
+      setMessage(null);
+      const res = await api.post('/thresholds/import', {});
+      setMessage({
+        type: 'success',
+        text: `Successfully imported ${res.data.imported_count} threshold records (version: ${res.data.table_version}) from ${res.data.source_file}`
+      });
+      await fetchThresholds();
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || err.message || 'Import failed';
+      setMessage({ type: 'error', text: `Import failed: ${detail}` });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      setImporting(true);
+      setMessage(null);
+      const res = await api.post('/thresholds/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setMessage({
+        type: 'success',
+        text: `Uploaded and imported ${res.data.imported_count} threshold entries from ${file.name}`
+      });
+      await fetchThresholds();
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || err.message || 'File upload failed';
+      setMessage({ type: 'error', text: `Upload failed: ${detail}` });
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   return (
     <div>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '1.8rem', fontWeight: 700 }}>Identity-wise EVT Threshold Audit</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '4px' }}>
-          Generalized Pareto Distribution (GPD) fits, exceedance parameters, and global EVT fallback status per identity
-        </p>
+      <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <h1 style={{ fontSize: '1.8rem', fontWeight: 700 }}>Identity-wise EVT Threshold Audit</h1>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginTop: '4px' }}>
+            Generalized Pareto Distribution (GPD) fits, exceedance parameters, and global EVT fallback status per identity (Spec 13.6)
+          </p>
+        </div>
+
+        {isAdmin && (
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              accept=".json"
+              onChange={handleFileUpload}
+            />
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="btn btn-secondary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}
+            >
+              <Upload size={16} />
+              Upload JSON
+            </button>
+
+            <button
+              onClick={handleImportFromJetson}
+              disabled={importing}
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem' }}
+            >
+              <RefreshCw size={16} className={importing ? 'spin' : ''} />
+              {importing ? 'Importing...' : 'Import from Jetson Storage'}
+            </button>
+          </div>
+        )}
       </div>
+
+      {message && (
+        <div
+          style={{
+            padding: '12px 16px',
+            borderRadius: '8px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontSize: '0.9rem',
+            background: message.type === 'success' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+            border: `1px solid ${message.type === 'success' ? 'var(--accent-green)' : 'var(--accent-rose)'}`,
+            color: message.type === 'success' ? '#34d399' : '#f87171'
+          }}
+        >
+          {message.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+          <span>{message.text}</span>
+        </div>
+      )}
 
       <div className="glass-panel" style={{ padding: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -57,10 +164,35 @@ export const ThresholdsPage: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {thresholds.length === 0 ? (
+            {loading ? (
               <tr>
                 <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '32px' }}>
-                  No threshold entries loaded in database.
+                  Loading threshold records...
+                </td>
+              </tr>
+            ) : thresholds.length === 0 ? (
+              <tr>
+                <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '40px' }}>
+                  <div style={{ maxWidth: '480px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                    <Sliders size={36} style={{ opacity: 0.4 }} />
+                    <p style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--text-main)' }}>
+                      No threshold entries loaded in database.
+                    </p>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      Load calibrated EVT POT/GPD parameters from <code>~/open-set-face-recognition/thresholds/threshold_table.json</code> on Jetson.
+                    </p>
+                    {isAdmin && (
+                      <button
+                        onClick={handleImportFromJetson}
+                        disabled={importing}
+                        className="btn btn-primary"
+                        style={{ marginTop: '8px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <RefreshCw size={16} className={importing ? 'spin' : ''} />
+                        Import threshold_table.json now
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ) : (

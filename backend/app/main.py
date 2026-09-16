@@ -81,6 +81,18 @@ def on_startup():
             )
             db.add(cam)
             db.commit()
+
+        # Auto-seed identity_thresholds if empty
+        from app.db.models import IdentityThreshold
+        from app.services.threshold_importer import import_thresholds_from_file
+        t_count = db.query(IdentityThreshold).count()
+        if t_count == 0:
+            logger.info("Identity thresholds table is empty. Attempting auto-import from threshold_table.json...")
+            try:
+                t_res = import_thresholds_from_file(db=db)
+                logger.info(f"Auto-imported {t_res['imported_count']} thresholds from {t_res.get('source_file')}")
+            except Exception as e_thresh:
+                logger.info(f"Threshold table auto-import skipped: {e_thresh}")
             
         db.close()
         logger.info("Database startup initialization completed successfully.")
