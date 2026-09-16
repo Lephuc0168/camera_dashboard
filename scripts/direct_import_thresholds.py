@@ -142,40 +142,50 @@ def main():
 
     print(f"      - Đã tải {len(persons_raw)} hồ sơ người dùng trong Database.")
 
-    # 3. Phân tích dữ liệu JSON
+    # 3. Phân tích dữ liệu JSON (Cấu trúc chuẩn EVT Calibration Workflow)
+    # Xác định phiên bản model và checkpoint
+    meta = raw.get("metadata", {}) if isinstance(raw, dict) else {}
+    ckpt_hash = meta.get("model_checkpoint_hash", "ckpt_evt")
+    prec_mode = meta.get("precision_mode", "fp32")
+    top_ver = f"ckpt_{ckpt_hash}_{prec_mode}" if meta.get("model_checkpoint_hash") else raw.get("threshold_table_version", "evt_pot_v1")
+    top_model = f"insightface_{ckpt_hash}_{prec_mode}" if meta.get("model_checkpoint_hash") else raw.get("model_version", "insightface_r100_fp16")
+
     records = []
-    top_ver = "evt_pot_v1"
-    top_model = "insightface_r100_fp16"
 
-    if isinstance(raw, dict):
-        top_ver = raw.get("threshold_table_version") or raw.get("version") or top_ver
-        top_model = raw.get("model_version") or raw.get("model") or top_model
+    # 3a. Global EVT row
+    if isinstance(raw, dict) and "global_evt" in raw and isinstance(raw["global_evt"], dict):
+        records.append(("__global__", raw["global_evt"]))
 
-        if "global_evt" in raw and isinstance(raw["global_evt"], dict):
-            records.append(("global_evt", raw["global_evt"]))
-        if "fixed" in raw and isinstance(raw["fixed"], dict):
-            records.append(("fixed", raw["fixed"]))
+    # 3b. Fixed baseline (nếu có)
+    if isinstance(raw, dict) and "fixed" in raw and isinstance(raw["fixed"], dict):
+        records.append(("fixed", raw["fixed"]))
 
-        if "identities" in raw and isinstance(raw["identities"], dict):
-            for k, v in raw["identities"].items():
-                if isinstance(v, dict):
-                    records.append((k, v))
-        elif "thresholds" in raw and isinstance(raw["thresholds"], dict):
-            for k, v in raw["thresholds"].items():
-                if isinstance(v, dict):
-                    records.append((k, v))
-        elif "records" in raw and isinstance(raw["records"], list):
-            for item in raw["records"]:
+    # 3c. Identities: hỗ trợ cả list (như file thực tế) và dict
+    if isinstance(raw, dict) and "identities" in raw:
+        id_data = raw["identities"]
+        if isinstance(id_data, list):
+            for item in id_data:
                 if isinstance(item, dict):
-                    records.append((None, item))
-        else:
-            for k, v in raw.items():
-                if k not in ["threshold_table_version", "model_version", "created_at", "metadata", "timestamp", "version", "model"] and isinstance(v, dict):
-                    records.append((k, v))
-    elif isinstance(raw, list):
-        for item in raw:
-            if isinstance(item, dict):
-                records.append((None, item))
+                    id_key = item.get("identity_id") or item.get("identity_name") or item.get("name")
+                    records.append((id_key, item))
+        elif isinstance(id_data, dict):
+            for id_key, item in id_data.items():
+                if isinstance(item, dict):
+                    records.append((id_key, item))
+
+    # 3d. Fallback nếu JSON dạng khác
+    if not records:
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, dict):
+                    id_key = item.get("identity_id") or item.get("identity_name") or item.get("name")
+                    records.append((id_key, item))
+        elif isinstance(raw, dict):
+            for id_key, item in raw.items():
+                if id_key not in ["schema_version", "config", "metadata", "created_at", "timestamp"] and isinstance(item, dict):
+                    records.append((id_key, item))
+
+    print(f"      - Đã phân tích được {len(records)} bản ghi ngưỡng từ file JSON.")
 
     # Xóa dữ liệu cũ để nạp mới
     cur.execute("DELETE FROM identity_thresholds;")
@@ -196,15 +206,16 @@ def main():
     for id_key, item in records:
         raw_type = item.get("threshold_type")
         if not raw_type:
-            if id_key in ["global_evt", "global"]:
+            if id_key in ["__global__", "global_evt", "global"]:
                 raw_type = "global_evt"
             elif id_key in ["fixed", "fixed_baseline"]:
                 raw_type = "fixed"
             else:
                 raw_type = "identity_gpd"
 
+        # Q tắc Spec 13.6: identity_id của global_evt và fixed luôn là NULL
         identity_id = None
-        if raw_type not in ["global_evt", "fixed"]:
+        if raw_type not in ["global_evt", "fixed"] and id_key not in ["__global__", "global"]:
             cand = item.get("identity_id") or id_key or item.get("identity_name") or item.get("name")
             if cand:
                 c_str = str(cand).strip().lower()
@@ -214,6 +225,7 @@ def main():
                 else:
                     try:
                         identity_id = str(uuid.UUID(str(cand)))
+                        matched += 1
                     except Exception:
                         pass
 
@@ -225,7 +237,7 @@ def main():
         n_exc = item.get("n_exceedances") or item.get("n_exceed")
         u_q = item.get("u_quantile") or item.get("quantile") or 0.95
         u_v = item.get("u_value") or item.get("u")
-        alpha = item.get("alpha") or 0.99
+        alpha = item.get("alpha_effective") or item.get("alpha") or 0.99
         g_shape = item.get("gpd_shape") or item.get("shape") or item.get("xi")
         g_scale = item.get("gpd_scale") or item.get("scale") or item.get("sigma")
         fit = str(item.get("fit_status") or item.get("status") or ("fallback" if fallback else "valid"))
