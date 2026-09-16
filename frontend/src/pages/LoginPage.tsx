@@ -14,7 +14,6 @@ export const LoginPage: React.FC = () => {
   const [regUsername, setRegUsername] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
-  const [regRole, setRegRole] = useState<'operator' | 'viewer' | 'admin'>('operator');
 
   // Forgot password fields
   const [resetUsername, setResetUsername] = useState('');
@@ -51,7 +50,8 @@ export const LoginPage: React.FC = () => {
       });
 
       localStorage.setItem('access_token', response.data.access_token);
-      localStorage.setItem('username', username);
+      localStorage.setItem('username', response.data.username || username);
+      localStorage.setItem('user_role', response.data.role || 'viewer');
       navigate('/dashboard');
     } catch (err: any) {
       if (!err.response) {
@@ -84,10 +84,10 @@ export const LoginPage: React.FC = () => {
       await api.post('/auth/register', {
         username: regUsername.trim(),
         password: regPassword,
-        role: regRole
+        role: 'viewer'
       });
 
-      setSuccessMsg(`Tài khoản "${regUsername}" đã được tạo thành công! Bạn có thể đăng nhập ngay.`);
+      setSuccessMsg(`Tài khoản Viewer "${regUsername}" đã được tạo thành công! Bạn có thể đăng nhập ngay.`);
       setUsername(regUsername);
       setPassword(regPassword);
       setRegUsername('');
@@ -361,28 +361,20 @@ export const LoginPage: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                Vai trò người dùng (Role)
-              </label>
-              <select
-                value={regRole}
-                onChange={(e: any) => setRegRole(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: 'var(--radius-md)',
-                  background: '#111827',
-                  border: '1px solid var(--border-glass)',
-                  color: 'white',
-                  outline: 'none',
-                  fontSize: '0.9rem'
-                }}
-              >
-                <option value="operator">Operator (Vận hành viên - Khuyến nghị)</option>
-                <option value="viewer">Viewer (Người xem / Giám sát)</option>
-                <option value="admin">Admin (Quản trị viên hệ thống)</option>
-              </select>
+            <div style={{
+              marginBottom: '14px',
+              padding: '12px 14px',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(99, 102, 241, 0.1)',
+              border: '1px solid rgba(99, 102, 241, 0.25)',
+              fontSize: '0.82rem',
+              color: '#c7d2fe',
+              lineHeight: 1.45
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: '#818cf8', marginBottom: '4px' }}>
+                <ShieldAlert size={15} /> Vai trò mặc định: Viewer (Chỉ xem)
+              </div>
+              Tài khoản tự đăng ký ngoại vi chỉ được cấp quyền Viewer. Để cấp quyền Vận hành (Operator) hoặc Quản trị (Admin), cần do Quản trị viên (Admin) tạo từ bên trong Dashboard.
             </div>
 
             <div style={{ marginBottom: '14px' }}>

@@ -6,6 +6,8 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+    role: str = "viewer"
+    username: str = ""
 
 class TokenData(BaseModel):
     username: str | None = None
@@ -18,7 +20,7 @@ class LoginRequest(BaseModel):
 class UserCreate(BaseModel):
     username: str
     password: str
-    role: str = "operator"
+    role: str = "viewer"
 
 class PasswordResetRequest(BaseModel):
     username: str

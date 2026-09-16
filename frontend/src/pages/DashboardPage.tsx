@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { InferenceWebSocket } from '../services/websocket';
 import { KpiCard } from '../components/KpiCard';
 import { StatusBadge } from '../components/StatusBadge';
 import { VideoPlayerWithCanvas } from '../components/VideoPlayerWithCanvas';
 import { DetectionBox, RecognitionEvent, StatsSummary } from '../types';
-import { UserCheck, UserX, AlertTriangle, Cpu, RefreshCw, Activity, HardDrive, Thermometer } from 'lucide-react';
+import { UserCheck, UserX, AlertTriangle, Cpu, RefreshCw, Activity, HardDrive, Thermometer, UserPlus, ShieldCheck } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
+  const navigate = useNavigate();
+  const userRole = localStorage.getItem('user_role') || 'viewer';
+
   const [stats, setStats] = useState<StatsSummary | null>(null);
   const [recentEvents, setRecentEvents] = useState<RecognitionEvent[]>([]);
   const [detections, setDetections] = useState<DetectionBox[]>([]);
@@ -85,10 +89,64 @@ export const DashboardPage: React.FC = () => {
             NVIDIA DeepStream + Identity-wise EVT Open-Set Face Recognition
           </p>
         </div>
-        <button onClick={fetchDashboardData} className="glass-button" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'white', border: '1px solid var(--border-glass)' }}>
-          <RefreshCw size={16} /> Refresh Stats
-        </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {userRole === 'admin' && (
+            <button
+              onClick={() => navigate('/users')}
+              className="glass-button"
+              style={{
+                background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                color: 'white',
+                border: 'none',
+                padding: '8px 16px',
+                fontSize: '0.88rem'
+              }}
+            >
+              <UserPlus size={16} /> Quản lý / Tạo tài khoản (3 Roles)
+            </button>
+          )}
+          <button onClick={fetchDashboardData} className="glass-button" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'white', border: '1px solid var(--border-glass)' }}>
+            <RefreshCw size={16} /> Refresh Stats
+          </button>
+        </div>
       </div>
+
+      {userRole === 'admin' && (
+        <div style={{
+          padding: '12px 18px',
+          marginBottom: '20px',
+          background: 'linear-gradient(90deg, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.1) 100%)',
+          border: '1px solid rgba(99, 102, 241, 0.3)',
+          borderRadius: 'var(--radius-md)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          fontSize: '0.86rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#c7d2fe' }}>
+            <ShieldCheck size={20} color="#818cf8" />
+            <span>
+              <strong>Đặc quyền Quản trị viên (Admin):</strong> Bạn có toàn quyền khởi tạo và quản lý tài khoản cho cả 3 vai trò (Admin, Operator, Viewer). Người dùng bên ngoài chỉ được phép tự đăng ký tài khoản Viewer.
+            </span>
+          </div>
+          <button
+            onClick={() => navigate('/users')}
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              color: 'white',
+              padding: '6px 14px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              whiteSpace: 'nowrap'
+            }}
+          >
+            Quản Lý Tài Khoản →
+          </button>
+        </div>
+      )}
 
       {errorMsg && (
         <div style={{ padding: '12px 16px', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid rgba(244, 63, 94, 0.3)', color: '#f43f5e', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem' }}>

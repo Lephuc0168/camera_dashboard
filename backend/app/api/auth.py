@@ -6,7 +6,7 @@ from app.config import settings
 from app.db.database import get_db
 from app.db.models import User
 from app.auth.password import verify_password, get_password_hash
-from app.auth.jwt import create_access_token, get_current_user
+from app.auth.jwt import create_access_token, get_current_user, require_role
 from app.schemas.auth import Token, UserRead, LoginRequest, UserCreate, PasswordResetRequest
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -31,27 +31,92 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "role": user.role,
+        "username": user.username
     }
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
+    """Đăng ký tự do bên ngoài màn hình đăng nhập: Cố định vai trò 'viewer' nhằm đảm bảo an toàn hệ thống."""
     existing = db.query(User).filter(User.username == user_in.username).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Tên tài khoản đã tồn tại trên hệ thống."
         )
+    # BẢO MẬT: Người dùng đăng ký bên ngoài CHỈ ĐƯỢC PHÉP tạo tài khoản vai trò 'viewer'
     new_user = User(
         username=user_in.username,
         password_hash=get_password_hash(user_in.password),
-        role=user_in.role if user_in.role in ["admin", "operator", "viewer"] else "operator",
+        role="viewer",
         is_active=True
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
     return new_user
+
+@router.post("/admin/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+def admin_create_user(
+    user_in: UserCreate,
+    current_admin: User = Depends(require_role(["admin"])),
+    db: Session = Depends(get_db)
+):
+    """Khởi tạo tài khoản nội bộ: Chỉ Quản trị viên (Admin) mới có quyền tạo đủ 3 vai trò (admin, operator, viewer)."""
+    if user_in.role not in ["admin", "operator", "viewer"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Vai trò không hợp lệ. Chọn admin, operator hoặc viewer."
+        )
+    existing = db.query(User).filter(User.username == user_in.username).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tên tài khoản '{user_in.username}' đã tồn tại trên hệ thống."
+        )
+    new_user = User(
+        username=user_in.username,
+        password_hash=get_password_hash(user_in.password),
+        role=user_in.role,
+        is_active=True
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+@router.get("/admin/users", response_model=list[UserRead])
+def admin_list_users(
+    current_admin: User = Depends(require_role(["admin"])),
+    db: Session = Depends(get_db)
+):
+    """Danh sách toàn bộ người dùng trong hệ thống (chỉ dành cho Admin)."""
+    return db.query(User).order_by(User.created_at.desc()).all()
+
+@router.delete("/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: str,
+    current_admin: User = Depends(require_role(["admin"])),
+    db: Session = Depends(get_db)
+):
+    """Xóa tài khoản người dùng (chỉ dành cho Admin, không thể tự xóa chính mình)."""
+    import uuid
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID người dùng không hợp lệ.")
+    
+    if current_admin.user_id == uid:
+        raise HTTPException(status_code=400, detail="Không thể tự xóa tài khoản của chính mình.")
+        
+    user_to_delete = db.query(User).filter(User.user_id == uid).first()
+    if not user_to_delete:
+        raise HTTPException(status_code=404, detail="Không tìm thấy người dùng.")
+    
+    db.delete(user_to_delete)
+    db.commit()
+    return {"status": "success", "message": f"Đã xóa tài khoản '{user_to_delete.username}' thành công."}
 
 @router.post("/reset-password")
 def reset_password(req: PasswordResetRequest, db: Session = Depends(get_db)):

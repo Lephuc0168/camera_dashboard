@@ -1,14 +1,16 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Sliders, History, Users, Camera, LogOut, ShieldAlert } from 'lucide-react';
+import { LayoutDashboard, Sliders, History, Users, Camera, LogOut, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const navigate = useNavigate();
   const username = localStorage.getItem('username') || 'Operator';
+  const userRole = localStorage.getItem('user_role') || 'viewer';
 
   const handleLogout = () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('username');
+    localStorage.removeItem('user_role');
     navigate('/login');
   };
 
@@ -59,6 +61,11 @@ export const Navbar: React.FC = () => {
         <NavLink to="/persons" style={({ isActive }) => navLinkStyle(isActive)}>
           <Users size={18} /> Enrolled Persons
         </NavLink>
+        {userRole === 'admin' && (
+          <NavLink to="/users" style={({ isActive }) => navLinkStyle(isActive)}>
+            <ShieldCheck size={18} /> Quản lý tài khoản
+          </NavLink>
+        )}
       </nav>
 
       <div style={{
@@ -71,8 +78,22 @@ export const Navbar: React.FC = () => {
         justifyContent: 'space-between'
       }}>
         <div>
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>{username}</div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>Active Session</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>{username}</span>
+            <span style={{
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              padding: '1px 6px',
+              borderRadius: '4px',
+              textTransform: 'uppercase',
+              color: userRole === 'admin' ? '#a855f7' : userRole === 'operator' ? '#06b6d4' : '#94a3b8',
+              background: userRole === 'admin' ? 'rgba(168, 85, 247, 0.2)' : userRole === 'operator' ? 'rgba(6, 182, 212, 0.2)' : 'rgba(148, 163, 184, 0.2)',
+              border: `1px solid ${userRole === 'admin' ? '#a855f7' : userRole === 'operator' ? '#06b6d4' : '#94a3b8'}40`
+            }}>
+              {userRole}
+            </span>
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '2px' }}>Active Session</div>
         </div>
         <button onClick={handleLogout} style={{
           background: 'none',

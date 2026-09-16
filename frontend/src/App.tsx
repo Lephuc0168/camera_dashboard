@@ -6,6 +6,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ThresholdsPage } from './pages/ThresholdsPage';
 import { EventsPage } from './pages/EventsPage';
 import { PersonsPage } from './pages/PersonsPage';
+import { UsersPage } from './pages/UsersPage';
 
 interface Props {
   children: ReactNode;
@@ -65,6 +66,7 @@ const ProtectedLayout: React.FC = () => {
             <Route path="/thresholds" element={<ThresholdsPage />} />
             <Route path="/events" element={<EventsPage />} />
             <Route path="/persons" element={<PersonsPage />} />
+            <Route path="/users" element={<UsersPage />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </ErrorBoundary>
