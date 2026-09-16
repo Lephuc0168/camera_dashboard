@@ -4,7 +4,7 @@ import { api } from '../services/api';
 import { InferenceWebSocket } from '../services/websocket';
 import { KpiCard } from '../components/KpiCard';
 import { StatusBadge } from '../components/StatusBadge';
-import { VideoPlayerWithCanvas } from '../components/VideoPlayerWithCanvas';
+import { VideoPlayerWithCanvas, CameraFeed } from '../components/VideoPlayerWithCanvas';
 import { DetectionBox, RecognitionEvent, StatsSummary } from '../types';
 import { UserCheck, UserX, AlertTriangle, Cpu, RefreshCw, Activity, HardDrive, Thermometer, UserPlus, ShieldCheck } from 'lucide-react';
 
@@ -31,6 +31,7 @@ export const DashboardPage: React.FC = () => {
 
   const [stats, setStats] = useState<StatsSummary | null>(null);
   const [recentEvents, setRecentEvents] = useState<RecognitionEvent[]>([]);
+  const [feeds, setFeeds] = useState<Record<string, CameraFeed>>({});
   const [detections, setDetections] = useState<DetectionBox[]>([]);
   const [frameBase64, setFrameBase64] = useState<string | undefined>(undefined);
   const [fps, setFps] = useState<number>(30.0);
@@ -83,14 +84,28 @@ export const DashboardPage: React.FC = () => {
     let ws: InferenceWebSocket | null = null;
     try {
       ws = new InferenceWebSocket((data: any) => {
+        const camId = data && data.camera_id ? String(data.camera_id) : 'camera_01';
         if (data && Array.isArray(data.detections)) {
           setDetections(data.detections);
         }
-        if (data && typeof data.fps === 'number') {
-          setFps(data.fps);
-        }
         if (data && data.frame_base64) {
           setFrameBase64(data.frame_base64);
+        }
+        if (data && (data.detections || data.frame_base64)) {
+          setFeeds((prev) => {
+            const next = { ...prev };
+            const existing = next[camId] || {};
+            next[camId] = {
+              ...existing,
+              ...(data.detections ? { detections: data.detections } : {}),
+              ...(data.frame_base64 ? { frameBase64: data.frame_base64 } : {}),
+              ...(typeof data.fps === 'number' ? { fps: data.fps } : {}),
+            };
+            return next;
+          });
+        }
+        if (data && typeof data.fps === 'number') {
+          setFps(data.fps);
         }
         if (data && data.stats) {
           setHwStats(data.stats);
@@ -253,7 +268,7 @@ export const DashboardPage: React.FC = () => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '20px' }}>
         <div>
           <h3 style={{ fontSize: '1.1rem', marginBottom: '12px' }}>Live WebRTC Video Stream</h3>
-          <VideoPlayerWithCanvas detections={detections} frameBase64={frameBase64} fps={safeFps} />
+          <VideoPlayerWithCanvas feeds={feeds} detections={detections} frameBase64={frameBase64} fps={safeFps} />
         </div>
 
         <div>
