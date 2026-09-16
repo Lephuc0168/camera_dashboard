@@ -18,7 +18,12 @@ class LoginRequest(BaseModel):
 class UserCreate(BaseModel):
     username: str
     password: str
-    role: str = "viewer"
+    role: str = "operator"
+
+class PasswordResetRequest(BaseModel):
+    username: str
+    recovery_code: str
+    new_password: str
 
 class UserRead(BaseModel):
     user_id: UUID

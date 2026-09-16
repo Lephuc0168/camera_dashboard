@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("JWT_SECRET", "super_secret_open_set_fr_jwt_key_2026")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    MASTER_RECOVERY_KEY: str = os.getenv("MASTER_RECOVERY_KEY", "nckh@2026")
     
     # CORS
     CORS_ORIGINS: list[str] = ["*"]
