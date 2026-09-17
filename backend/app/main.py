@@ -14,6 +14,7 @@ from app.api.events import router as events_router
 from app.api.thresholds import router as thresholds_router
 from app.api.stats import router as stats_router
 from app.api.health import router as health_router
+from app.api.internal import router as internal_router
 from app.websocket.inference import router as ws_router
 
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +42,7 @@ app.include_router(cameras_router, prefix=settings.API_V1_STR)
 app.include_router(events_router, prefix=settings.API_V1_STR)
 app.include_router(thresholds_router, prefix=settings.API_V1_STR)
 app.include_router(stats_router, prefix=settings.API_V1_STR)
+app.include_router(internal_router, prefix=settings.API_V1_STR)
 app.include_router(health_router)
 app.include_router(ws_router)
 
