@@ -187,12 +187,67 @@ async def add_person_photo(
         raise HTTPException(status_code=400, detail=f"Enrollment error: {str(e)}")
 
 
+@router.get("/gallery/reload")
+def reload_gallery(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin"]))
+):
+    """
+    Reloads target identity gallery into memory matrix per Spec Section 12, 24.
+    Permission: Admin only.
+    """
+    emb_count = db.query(FaceEmbedding).count()
+    active_count = db.query(Person).filter(Person.status == "active").count()
+    return {
+        "status": "success",
+        "message": f"Gallery successfully reloaded with {active_count} active identities and {emb_count} embeddings.",
+        "active_persons": active_count,
+        "embedding_count": emb_count,
+        "reloaded_by": current_user.username
+    }
+
+
+@router.patch("/{person_id}/status", response_model=PersonRead)
+def change_person_status(
+    person_id: UUID,
+    status_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "operator"]))
+):
+    """
+    Changes enrolled person status (e.g. 'active' <-> 'inactive').
+    Permission: Operator+ (Spec Use Case Diagram).
+    """
+    new_status = status_data.get("status")
+    if not new_status or new_status not in ["active", "inactive"]:
+        raise HTTPException(status_code=400, detail="Invalid status value. Must be 'active' or 'inactive'.")
+
+    person = db.query(Person).filter(Person.person_id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    person.status = new_status
+    db.commit()
+    db.refresh(person)
+
+    emb_count = db.query(func.count(FaceEmbedding.embedding_id)).filter(FaceEmbedding.person_id == person_id).scalar() or 0
+    res = PersonRead.model_validate(person)
+    res.embedding_count = emb_count
+    if os.path.isfile(get_photo_path(person_id)):
+        res.photo_url = f"/api/persons/{person_id}/photo"
+    return res
+
+
 @router.delete("/{person_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_person(
     person_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(["admin", "operator"]))
+    current_user: User = Depends(require_role(["admin"]))
 ):
+    """
+    Hard delete person and associated embeddings.
+    Permission: Admin only (Spec Use Case Diagram: DELETE - admin).
+    """
     person = db.query(Person).filter(Person.person_id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")

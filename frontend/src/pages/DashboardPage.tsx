@@ -179,7 +179,6 @@ export const DashboardPage: React.FC = () => {
       {/* Main Grid: Video Stream + Recent Events */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '20px' }}>
         <div>
-          <h3 style={{ fontSize: '1.1rem', marginBottom: '12px' }}>Live WebRTC Video Stream</h3>
           <VideoPlayerWithCanvas feeds={feeds} detections={detections} frameBase64={frameBase64} fps={safeFps} />
         </div>
 

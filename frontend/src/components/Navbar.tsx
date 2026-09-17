@@ -99,7 +99,7 @@ export const Navbar: React.FC = () => {
         <NavLink to="/persons" style={({ isActive }) => navLinkStyle(isActive)}>
           <Users size={18} /> Enrolled Persons
         </NavLink>
-        {userRole === 'admin' && (
+        {(userRole.toLowerCase() === 'admin' || username.toLowerCase() === 'admin') && (
           <NavLink to="/users" style={({ isActive }) => navLinkStyle(isActive)}>
             <ShieldCheck size={18} /> User Management
           </NavLink>

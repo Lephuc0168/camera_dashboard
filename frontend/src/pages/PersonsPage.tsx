@@ -31,6 +31,29 @@ export const PersonsPage: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  const [reloadingGallery, setReloadingGallery] = useState(false);
+
+  const getInitialRole = () => {
+    const u = localStorage.getItem('username') || '';
+    if (u.toLowerCase() === 'admin') return 'admin';
+    let r = localStorage.getItem('user_role');
+    if (!r || r === 'viewer') {
+      const token = localStorage.getItem('access_token');
+      if (token) {
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          if (payload.role) return payload.role;
+        } catch(e) {}
+      }
+    }
+    return r || 'viewer';
+  };
+
+  const userRole = (localStorage.getItem('user_role') || getInitialRole()).toLowerCase();
+  const username = (localStorage.getItem('username') || '').toLowerCase();
+  const isAdmin = userRole === 'admin' || username === 'admin';
+  const isOperatorOrAdmin = isAdmin || userRole === 'operator';
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -241,6 +264,36 @@ export const PersonsPage: React.FC = () => {
     }
   };
 
+  const handleReloadGallery = async () => {
+    try {
+      setReloadingGallery(true);
+      setErrorMsg(null);
+      const res = await api.get('/persons/gallery/reload');
+      setSuccessMsg(res.data?.message || 'Gallery runtime matrix successfully reloaded from database.');
+      setTimeout(() => setSuccessMsg(null), 5000);
+      await fetchPersons();
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || err.message || 'Failed to reload gallery';
+      setErrorMsg('Reload gallery error: ' + detail);
+    } finally {
+      setReloadingGallery(false);
+    }
+  };
+
+  const handleToggleStatus = async (personId: string, currentStatus: string) => {
+    if (!isOperatorOrAdmin) return;
+    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    try {
+      await api.patch(`/persons/${personId}/status`, { status: newStatus });
+      setPersons(prev => prev.map(p => p.person_id === personId ? { ...p, status: newStatus } : p));
+      setSuccessMsg(`Status updated to ${newStatus.toUpperCase()}`);
+      setTimeout(() => setSuccessMsg(null), 3000);
+    } catch (err: any) {
+      const detail = err.response?.data?.detail || err.message || 'Failed to change status';
+      alert(detail);
+    }
+  };
+
   const filteredPersons = persons.filter((p) => {
     const q = searchQuery.toLowerCase();
     return p.full_name.toLowerCase().includes(q) || (p.student_code || '').toLowerCase().includes(q);
@@ -256,16 +309,32 @@ export const PersonsPage: React.FC = () => {
             Registered target identities loaded into Jetson PostgreSQL and runtime embedding matrix (Spec Section 25)
           </p>
         </div>
-        <button 
-          onClick={() => {
-            setShowAddModal(true);
-            setErrorMsg(null);
-          }} 
-          className="btn btn-primary"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
-        >
-          <UserPlus size={18} /> Enroll New Identity
-        </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          {isAdmin && (
+            <button 
+              onClick={handleReloadGallery}
+              disabled={reloadingGallery}
+              className="btn btn-secondary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+              title="Admin only: Reload runtime gallery matrix from database"
+            >
+              <RefreshCw size={16} className={reloadingGallery ? 'spin' : ''} />
+              {reloadingGallery ? 'Reloading...' : 'Reload Gallery'}
+            </button>
+          )}
+          {isOperatorOrAdmin && (
+            <button 
+              onClick={() => {
+                setShowAddModal(true);
+                setErrorMsg(null);
+              }} 
+              className="btn btn-primary"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+            >
+              <UserPlus size={18} /> Enroll New Identity
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Success Notification */}
@@ -719,7 +788,30 @@ export const PersonsPage: React.FC = () => {
                       {p.student_code || 'N/A'}
                     </td>
                     <td>
-                      <span className="badge badge-known">{p.status.toUpperCase()}</span>
+                      {isOperatorOrAdmin ? (
+                        <button
+                          onClick={() => handleToggleStatus(p.person_id, p.status)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            textAlign: 'left'
+                          }}
+                          title="Click to toggle status (Operator+)"
+                        >
+                          <span 
+                            className={`badge ${p.status === 'active' ? 'badge-known' : 'badge-abstain'}`}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                          >
+                            {p.status.toUpperCase()} <span style={{ opacity: 0.6, fontSize: '0.7rem' }}>⇄</span>
+                          </span>
+                        </button>
+                      ) : (
+                        <span className={`badge ${p.status === 'active' ? 'badge-known' : 'badge-abstain'}`}>
+                          {p.status.toUpperCase()}
+                        </span>
+                      )}
                     </td>
                     <td>
                       <span style={{ fontWeight: 600, color: p.embedding_count > 0 ? 'var(--accent-cyan)' : 'var(--accent-amber)' }}>
@@ -745,20 +837,24 @@ export const PersonsPage: React.FC = () => {
                       {new Date(p.created_at).toLocaleDateString()}
                     </td>
                     <td>
-                      <button
-                        onClick={() => handleDeletePerson(p.person_id, p.full_name)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--accent-rose)',
-                          cursor: 'pointer',
-                          padding: '6px',
-                          borderRadius: '4px'
-                        }}
-                        title="Delete Person"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      {isAdmin ? (
+                        <button
+                          onClick={() => handleDeletePerson(p.person_id, p.full_name)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--accent-rose)',
+                            cursor: 'pointer',
+                            padding: '6px',
+                            borderRadius: '4px'
+                          }}
+                          title="Hard Delete Person (Admin only)"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      ) : (
+                        <span style={{ color: 'var(--text-dim)', fontSize: '0.85rem' }}>—</span>
+                      )}
                     </td>
                   </tr>
                 );

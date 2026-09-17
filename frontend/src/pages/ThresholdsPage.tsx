@@ -11,9 +11,9 @@ export const ThresholdsPage: React.FC = () => {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const isAdmin = 
-    (localStorage.getItem('user_role') === 'admin') || 
-    ((localStorage.getItem('username') || '').toLowerCase() === 'admin');
+  const userRole = (localStorage.getItem('user_role') || '').toLowerCase();
+  const username = (localStorage.getItem('username') || '').toLowerCase();
+  const isAdmin = userRole === 'admin' || username === 'admin';
 
   const fetchThresholds = async () => {
     try {

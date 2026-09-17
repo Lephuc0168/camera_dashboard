@@ -7,7 +7,7 @@ import json
 from app.db.database import get_db
 from app.db.models import IdentityThreshold, Person, User
 from app.schemas.threshold import IdentityThresholdRead
-from app.auth.jwt import get_current_user
+from app.auth.jwt import get_current_user, require_role
 from app.services.threshold_importer import import_thresholds_from_file, import_thresholds_from_data
 
 router = APIRouter(prefix="/thresholds", tags=["Identity Thresholds"])
@@ -58,13 +58,11 @@ def get_threshold(
 def import_thresholds(
     request: ThresholdImportRequest = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin"]))
 ):
     """
     Imports threshold_table.json into identity_thresholds table per Spec Section 13.6.
-    If file_path is omitted, searches default system paths on Jetson:
-    - ~/open-set-face-recognition/thresholds/threshold_table.json
-    - /home/jetson/open-set-face-recognition/thresholds/threshold_table.json
+    Permission: Admin only.
     """
     file_path = request.file_path if request else None
     clear_existing = request.clear_existing if request else True
@@ -83,10 +81,11 @@ async def upload_thresholds(
     file: UploadFile = File(...),
     clear_existing: bool = True,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role(["admin"]))
 ):
     """
     Accepts direct upload of threshold_table.json from the frontend/browser.
+    Permission: Admin only.
     """
     try:
         content = await file.read()
