@@ -52,9 +52,9 @@ export const UsersPage: React.FC = () => {
     } catch (err: any) {
       console.error('Failed to load users:', err);
       if (err.response?.status === 404) {
-        setError('Backend API (/auth/admin/users) is not updated yet. Run "git pull" on Jetson to sync backend.');
+        setError('Backend trên Jetson đang chạy mã nguồn cũ nên chưa có API quản lý tài khoản (/api/auth/admin/users). Hãy chạy 1 dòng lệnh sau trên terminal Jetson để cập nhật ngay: git clone --depth 1 https://github.com/Lephuc0168/camera_dashboard.git /tmp/dash && cp -r /tmp/dash/backend/* ~/open-set-face-recognition/backend/ && rm -rf /tmp/dash');
       } else {
-        setError(err.response?.data?.detail || 'Failed to load user accounts.');
+        setError(err.response?.data?.detail || 'Không thể tải danh sách tài khoản từ máy chủ.');
       }
       // Graceful fallback: always display current logged-in admin user
       if (currentRole === 'admin') {

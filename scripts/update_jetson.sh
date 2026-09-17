@@ -6,10 +6,12 @@ set -e
 
 echo === [1/4] Detecting Jetson Backend Directory ===
 CANDIDATES=(
-  $HOME/dt/backend
-  /home/jetson/dt/backend
-  $HOME/camera_dashboard/backend
-  $HOME/ai_camera_dashboard/backend
+  "$HOME/open-set-face-recognition/backend"
+  "/home/jetson/open-set-face-recognition/backend"
+  "$HOME/dt/backend"
+  "/home/jetson/dt/backend"
+  "$HOME/camera_dashboard/backend"
+  "$HOME/ai_camera_dashboard/backend"
 )
 
 TARGET_DIR=""
