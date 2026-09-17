@@ -1,4 +1,4 @@
-import os
+﻿import os
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -11,9 +11,13 @@ from app.schemas.person import PersonCreate, PersonUpdate, PersonRead
 from app.auth.jwt import get_current_user, require_role
 from app.services.face_enrollment import (
     enroll_face_pipeline,
+    enroll_multiple_faces_pipeline,
     QualityGateError,
+    QualityFilterError,
+    FaceDetectionError,
     ENROLLED_FACES_DIR
 )
+from app.services.gallery_manager import gallery_state
 
 router = APIRouter(prefix="/persons", tags=["Persons"])
 
@@ -32,19 +36,28 @@ def list_persons(
     persons = db.query(Person).offset(skip).limit(limit).all()
     results = []
     for p in persons:
-        emb_query = db.query(FaceEmbedding).filter(FaceEmbedding.person_id == p.person_id).order_by(FaceEmbedding.created_at.desc()).first()
-        emb_count = db.query(func.count(FaceEmbedding.embedding_id)).filter(FaceEmbedding.person_id == p.person_id).scalar() or 0
-        
+        emb_query = (
+            db.query(FaceEmbedding)
+            .filter(FaceEmbedding.person_id == p.person_id)
+            .order_by(FaceEmbedding.created_at.desc())
+            .first()
+        )
+        emb_count = (
+            db.query(func.count(FaceEmbedding.embedding_id))
+            .filter(FaceEmbedding.person_id == p.person_id)
+            .scalar() or 0
+        )
+
         p_dict = PersonRead.model_validate(p)
         p_dict.embedding_count = emb_count
-        
+
         # Check if portrait photo exists
         if os.path.isfile(get_photo_path(p.person_id)):
             p_dict.photo_url = f"/api/persons/{p.person_id}/photo"
-        
+
         if emb_query and emb_query.quality_score is not None:
             p_dict.quality_score = emb_query.quality_score
-            
+
         results.append(p_dict)
     return results
 
@@ -55,13 +68,21 @@ def create_person(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["admin", "operator"]))
 ):
-    """Metadata-only registration (Backwards compatibility)."""
+    """
+    Metadata-only registration per Spec Section 14.
+    Role: operator, admin.
+    """
     if person_in.student_code:
         existing = db.query(Person).filter(Person.student_code == person_in.student_code).first()
         if existing:
             raise HTTPException(status_code=400, detail="Student code already registered")
-            
-    person = Person(**person_in.model_dump())
+
+    person = Person(
+        full_name=person_in.full_name,
+        student_code=person_in.student_code,
+        status=person_in.status,
+        created_by=current_user.user_id
+    )
     db.add(person)
     db.commit()
     db.refresh(person)
@@ -80,11 +101,12 @@ async def enroll_person_with_face(
     current_user: User = Depends(require_role(["admin", "operator"]))
 ):
     """
-    Complete Face Enrollment per Spec Section 25:
-    - Registers Person profile in PostgreSQL
-    - Runs Quality Gate on face photo (resolution, blur, detection)
-    - Aligns and extracts 512D unit-normalized embedding
-    - Configures Global EVT Fallback in identity_thresholds
+    Complete Face Enrollment per Spec Section 12, 14, 25:
+    - Registers Person profile with created_by audit metadata.
+    - Runs Quality Gate on face photo (resolution >= 200x200, blur >= min_blur, frontal face).
+    - Extracts 512D unit-normalized embedding (||v||_2 = 1.0).
+    - Configures Global EVT Fallback in identity_thresholds.
+    - Reloads gallery atomically.
     """
     clean_code = student_code.strip() if student_code and student_code.strip() else None
     if clean_code:
@@ -95,7 +117,8 @@ async def enroll_person_with_face(
     person = Person(
         full_name=full_name.strip(),
         student_code=clean_code,
-        status=status_str
+        status=status_str,
+        created_by=current_user.user_id
     )
     db.add(person)
     db.commit()
@@ -108,10 +131,11 @@ async def enroll_person_with_face(
         try:
             image_bytes = await photo.read()
             if len(image_bytes) > 0:
-                enroll_res = enroll_face_pipeline(image_bytes, person, db)
+                is_webcam = (photo.filename or "").startswith("webcam")
+                enroll_res = enroll_face_pipeline(image_bytes, person, db, is_webcam=is_webcam)
                 quality_score = enroll_res.get("quality_score")
                 photo_url = f"/api/persons/{person.person_id}/photo"
-        except QualityGateError as qe:
+        except (QualityFilterError, FaceDetectionError, QualityGateError) as qe:
             db.delete(person)
             db.commit()
             raise HTTPException(status_code=422, detail=str(qe))
@@ -127,6 +151,45 @@ async def enroll_person_with_face(
     return res
 
 
+@router.post("/{person_id}/embeddings")
+async def enroll_person_embeddings(
+    person_id: UUID,
+    images: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin", "operator"]))
+):
+    """
+    Dedicated Multi-image Face Enrollment Endpoint per Spec Section 14.7:
+    POST /api/persons/{person_id}/embeddings
+    Role: operator, admin
+    Multipart Body: images: [file1.jpg, file2.png, ...] (max 20 images)
+    Response 200: {"embeddings_added": K, "quality_rejected": M, "detection_rejected": L}
+    Response 422: {"detail": "All N images failed quality filter"} or {"detail": "No faces detected in N images"}
+    """
+    person = db.query(Person).filter(Person.person_id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    if not images:
+        raise HTTPException(status_code=400, detail="No images provided")
+
+    if len(images) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 images per enrollment allowed (Spec Section 12.3)")
+
+    images_data = []
+    for img_file in images:
+        content = await img_file.read()
+        images_data.append((img_file.filename or "image.jpg", content))
+
+    try:
+        result = enroll_multiple_faces_pipeline(images_data, person, db)
+        return result
+    except (QualityFilterError, FaceDetectionError, QualityGateError) as qe:
+        raise HTTPException(status_code=422, detail=str(qe))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Embedding extraction failed: {str(e)}")
+
+
 @router.get("/{person_id}", response_model=PersonRead)
 def get_person(
     person_id: UUID,
@@ -136,10 +199,19 @@ def get_person(
     person = db.query(Person).filter(Person.person_id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
-    
-    emb_query = db.query(FaceEmbedding).filter(FaceEmbedding.person_id == person_id).order_by(FaceEmbedding.created_at.desc()).first()
-    emb_count = db.query(func.count(FaceEmbedding.embedding_id)).filter(FaceEmbedding.person_id == person_id).scalar() or 0
-    
+
+    emb_query = (
+        db.query(FaceEmbedding)
+        .filter(FaceEmbedding.person_id == person_id)
+        .order_by(FaceEmbedding.created_at.desc())
+        .first()
+    )
+    emb_count = (
+        db.query(func.count(FaceEmbedding.embedding_id))
+        .filter(FaceEmbedding.person_id == person_id)
+        .scalar() or 0
+    )
+
     res = PersonRead.model_validate(person)
     res.embedding_count = emb_count
     if os.path.isfile(get_photo_path(person_id)):
@@ -175,13 +247,14 @@ async def add_person_photo(
 
     try:
         image_bytes = await photo.read()
-        enroll_res = enroll_face_pipeline(image_bytes, person, db)
+        is_webcam = (photo.filename or "").startswith("webcam")
+        enroll_res = enroll_face_pipeline(image_bytes, person, db, is_webcam=is_webcam)
         return {
             "status": "success",
             "quality_score": enroll_res.get("quality_score"),
             "photo_url": f"/api/persons/{person_id}/photo"
         }
-    except QualityGateError as qe:
+    except (QualityFilterError, FaceDetectionError, QualityGateError) as qe:
         raise HTTPException(status_code=422, detail=str(qe))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Enrollment error: {str(e)}")
@@ -193,18 +266,11 @@ def reload_gallery(
     current_user: User = Depends(require_role(["admin"]))
 ):
     """
-    Reloads target identity gallery into memory matrix per Spec Section 12, 24.
+    Reloads target identity gallery into memory matrix per Spec Section 12.1 & 14.8.
     Permission: Admin only.
     """
-    emb_count = db.query(FaceEmbedding).count()
-    active_count = db.query(Person).filter(Person.status == "active").count()
-    return {
-        "status": "success",
-        "message": f"Gallery successfully reloaded with {active_count} active identities and {emb_count} embeddings.",
-        "active_persons": active_count,
-        "embedding_count": emb_count,
-        "reloaded_by": current_user.username
-    }
+    res = gallery_state.reload(db)
+    return res
 
 
 @router.patch("/{person_id}/status", response_model=PersonRead)
@@ -216,6 +282,7 @@ def change_person_status(
 ):
     """
     Changes enrolled person status (e.g. 'active' <-> 'inactive').
+    Per Spec Section 12.1: triggers gallery reload.
     Permission: Operator+ (Spec Use Case Diagram).
     """
     new_status = status_data.get("status")
@@ -230,7 +297,17 @@ def change_person_status(
     db.commit()
     db.refresh(person)
 
-    emb_count = db.query(func.count(FaceEmbedding.embedding_id)).filter(FaceEmbedding.person_id == person_id).scalar() or 0
+    # Spec Section 12.1: Trigger gallery reload
+    try:
+        gallery_state.reload(db)
+    except Exception:
+        pass
+
+    emb_count = (
+        db.query(func.count(FaceEmbedding.embedding_id))
+        .filter(FaceEmbedding.person_id == person_id)
+        .scalar() or 0
+    )
     res = PersonRead.model_validate(person)
     res.embedding_count = emb_count
     if os.path.isfile(get_photo_path(person_id)):
@@ -245,13 +322,14 @@ def delete_person(
     current_user: User = Depends(require_role(["admin"]))
 ):
     """
-    Hard delete person and associated embeddings.
-    Permission: Admin only (Spec Use Case Diagram: DELETE - admin).
+    Hard delete person and associated embeddings per Spec Section 14.
+    Per Spec Section 12.1: triggers gallery reload.
+    Permission: Admin only.
     """
     person = db.query(Person).filter(Person.person_id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
-        
+
     # Remove photo if exists
     photo_file = get_photo_path(person_id)
     if os.path.isfile(photo_file):
@@ -262,4 +340,11 @@ def delete_person(
 
     db.delete(person)
     db.commit()
+
+    # Spec Section 12.1: Trigger gallery reload
+    try:
+        gallery_state.reload(db)
+    except Exception:
+        pass
+
     return None

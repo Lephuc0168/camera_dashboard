@@ -17,6 +17,7 @@ class PersonUpdate(BaseModel):
 
 class PersonRead(PersonBase):
     person_id: UUID
+    created_by: UUID | None = None
     created_at: datetime
     updated_at: datetime
     embedding_count: int = 0

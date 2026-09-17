@@ -65,6 +65,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SQL_FILE="$(dirname "$SCRIPT_DIR")/database/init_schema.sql"
 if [ -f "$SQL_FILE" ]; then
     PGPASSWORD="open_set_fr_pass" psql -h 127.0.0.1 -U open_set_fr -d open_set_fr -f "$SQL_FILE" || true
+    # Migration Spec v3 §13.2
+    PGPASSWORD="open_set_fr_pass" psql -h 127.0.0.1 -U open_set_fr -d open_set_fr -c "ALTER TABLE persons ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(user_id);" || true
 fi
 
 # 5. Kiểm tra kết nối thực tế

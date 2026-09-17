@@ -45,11 +45,14 @@ if [ -f $TARGET_DIR/requirements.txt ]; then
 fi
 
 echo ============================================================
-echo ✅ Update complete! All new API routes are now available:
-echo    - POST /api/persons/enroll
+echo ✅ Update complete! Spec v3 Enrollment API routes are active:
+echo    - POST /api/persons/enroll (Spec v3 §25)
+echo    - POST /api/persons/{person_id}/embeddings (Spec v3 §14.7 multi-image)
+echo    - GET  /api/gallery/reload (Spec v3 §14.8 atomic reload)
 echo    - POST /api/thresholds/import
 echo    - POST /api/thresholds/upload
 echo    - GET  /api/persons/{id}/photo
+echo    - Spec v3 §13.2 created_by column migration
 echo ============================================================
 echo If uvicorn was running with --reload, it has automatically reloaded.
 echo If not running, you can start it with:

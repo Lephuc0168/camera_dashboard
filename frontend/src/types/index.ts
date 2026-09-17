@@ -11,6 +11,7 @@ export interface Person {
   student_code?: string;
   full_name: string;
   status: string;
+  created_by?: string;
   created_at: string;
   updated_at: string;
   embedding_count: number;

@@ -1,10 +1,14 @@
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.db.database import SessionLocal, engine, Base
+from app.db.database import SessionLocal, engine, Base, get_db
 from app.db.models import User, Camera
 from app.auth.password import get_password_hash
+from app.auth.jwt import require_role
+from app.services.gallery_manager import gallery_state
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 # Imports for API routers
 from app.api.auth import router as auth_router
@@ -45,6 +49,18 @@ app.include_router(stats_router, prefix=settings.API_V1_STR)
 app.include_router(internal_router, prefix=settings.API_V1_STR)
 app.include_router(health_router)
 app.include_router(ws_router)
+
+@app.get(f"{settings.API_V1_STR}/gallery/reload")
+def manual_gallery_reload_api(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["admin"]))
+):
+    """
+    Spec Section 14.8: Manual gallery reload
+    GET /api/gallery/reload
+    Role: admin only
+    """
+    return gallery_state.reload(db)
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
@@ -78,6 +94,14 @@ def on_startup():
     logger.info("Initializing database tables and seed data...")
     try:
         Base.metadata.create_all(bind=engine)
+        # Idempotent migration for Spec v3 Section 13.2 created_by field
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE persons ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(user_id);"))
+                conn.commit()
+        except Exception as e_mig:
+            logger.info(f"Schema migration check for persons.created_by: {e_mig}")
+
         db = SessionLocal()
         
         # Seed default Admin User if not exists

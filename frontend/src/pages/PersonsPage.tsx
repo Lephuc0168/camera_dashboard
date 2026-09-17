@@ -20,8 +20,8 @@ export const PersonsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [fullName, setFullName] = useState('');
   const [studentCode, setStudentCode] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraLoading, setCameraLoading] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
@@ -162,24 +162,27 @@ export const PersonsPage: React.FC = () => {
     canvas.toBlob((blob) => {
       if (blob) {
         const file = new File([blob], `webcam_portrait_${Date.now()}.jpg`, { type: 'image/jpeg' });
-        setSelectedFile(file);
-        setPreviewUrl(canvas.toDataURL('image/jpeg', 0.95));
+        setSelectedFiles([file]);
+        setPreviewUrls([canvas.toDataURL('image/jpeg', 0.95)]);
         stopCamera();
       }
     }, 'image/jpeg', 0.95);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      const reader = new FileReader();
-      reader.onload = () => {
-        setPreviewUrl(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      const fileList = Array.from(files).slice(0, 20);
+      setSelectedFiles(fileList);
+      const urls = fileList.map((f) => URL.createObjectURL(f));
+      setPreviewUrls(urls);
       stopCamera();
     }
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+    setPreviewUrls((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleCloseModal = () => {
@@ -187,8 +190,8 @@ export const PersonsPage: React.FC = () => {
     stopCamera();
     setFullName('');
     setStudentCode('');
-    setSelectedFile(null);
-    setPreviewUrl(null);
+    setSelectedFiles([]);
+    setPreviewUrls([]);
     setErrorMsg(null);
   };
 
@@ -203,7 +206,45 @@ export const PersonsPage: React.FC = () => {
       setSubmitting(true);
       setErrorMsg(null);
 
-      // 1. Attempt Spec Section 25 full enrollment (Photo + Quality Gate + 512D ArcFace + Global EVT)
+      // Branch 1: Multi-image enrollment per Spec v3 Section 14.7
+      if (selectedFiles.length > 1) {
+        // Step 1: Create Person profile (Spec Section 14)
+        const personRes = await api.post('/persons', {
+          full_name: fullName.trim(),
+          student_code: studentCode.trim() || undefined,
+          status: 'active'
+        });
+        const personId = personRes.data.person_id;
+
+        // Step 2: Upload multiple embeddings
+        try {
+          const formData = new FormData();
+          selectedFiles.forEach((file) => {
+            formData.append('images', file);
+          });
+
+          const embRes = await api.post(`/persons/${personId}/embeddings`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+          });
+
+          setSuccessMsg(
+            `Identity '${fullName}' enrolled successfully! ` +
+            `Added ${embRes.data.embeddings_added} vector(s) (Quality rejected: ${embRes.data.quality_rejected}, Detection rejected: ${embRes.data.detection_rejected}).`
+          );
+          setTimeout(() => setSuccessMsg(null), 6000);
+          handleCloseModal();
+          await fetchPersons();
+          return;
+        } catch (embErr: any) {
+          // If all embeddings failed, rollback created person
+          try {
+            await api.delete(`/persons/${personId}`);
+          } catch (e) {}
+          throw embErr;
+        }
+      }
+
+      // Branch 2: Single photo or metadata-only enrollment (Spec Section 25)
       try {
         const formData = new FormData();
         formData.append('full_name', fullName.trim());
@@ -211,8 +252,8 @@ export const PersonsPage: React.FC = () => {
           formData.append('student_code', studentCode.trim());
         }
         formData.append('status_str', 'active');
-        if (selectedFile) {
-          formData.append('photo', selectedFile);
+        if (selectedFiles.length === 1) {
+          formData.append('photo', selectedFiles[0]);
         }
 
         const res = await api.post('/persons/enroll', formData, {
@@ -226,7 +267,6 @@ export const PersonsPage: React.FC = () => {
         return;
       } catch (enrollErr: any) {
         const status = enrollErr.response?.status;
-        // If 405 (Method Not Allowed) or 404 (Not Found), backend hasn't been synced; fallback to /persons
         if (status === 405 || status === 404) {
           console.warn('/persons/enroll returned HTTP ' + status + ', attempting metadata registration fallback...');
           const fallbackRes = await api.post('/persons', {
@@ -243,7 +283,6 @@ export const PersonsPage: React.FC = () => {
           await fetchPersons();
           return;
         }
-        // Rethrow other errors (e.g. Quality Gate validation error, duplicate code)
         throw enrollErr;
       }
     } catch (err: any) {
@@ -268,8 +307,14 @@ export const PersonsPage: React.FC = () => {
     try {
       setReloadingGallery(true);
       setErrorMsg(null);
-      const res = await api.get('/persons/gallery/reload');
-      setSuccessMsg(res.data?.message || 'Gallery runtime matrix successfully reloaded from database.');
+      let res;
+      try {
+        res = await api.get('/gallery/reload');
+      } catch (e) {
+        res = await api.get('/persons/gallery/reload');
+      }
+      const data = res.data;
+      setSuccessMsg(`Gallery reloaded! ${data.gallery_size ?? data.active_persons ?? 0} active embeddings loaded in memory (Version: ${data.threshold_table_version || 'N/A'}).`);
       setTimeout(() => setSuccessMsg(null), 5000);
       await fetchPersons();
     } catch (err: any) {
@@ -543,51 +588,73 @@ export const PersonsPage: React.FC = () => {
                         </button>
                       </div>
                     </div>
-                  ) : previewUrl ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-                      <div style={{ position: 'relative' }}>
-                        <img 
-                          src={previewUrl} 
-                          alt="Face Preview" 
-                          style={{ width: '120px', height: '120px', borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--primary)' }} 
-                        />
+                  ) : previewUrls.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', maxHeight: '180px', overflowY: 'auto', padding: '4px' }}>
+                        {previewUrls.map((url, idx) => (
+                          <div key={idx} style={{ position: 'relative' }}>
+                            <img 
+                              src={url} 
+                              alt={`Face Preview ${idx + 1}`} 
+                              style={{ 
+                                width: previewUrls.length === 1 ? '120px' : '72px', 
+                                height: previewUrls.length === 1 ? '120px' : '72px', 
+                                borderRadius: previewUrls.length === 1 ? '50%' : '8px', 
+                                objectFit: 'cover', 
+                                border: '2px solid var(--primary)' 
+                              }} 
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePhoto(idx)}
+                              style={{
+                                position: 'absolute',
+                                top: '-6px',
+                                right: '-6px',
+                                background: 'var(--accent-rose)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: '22px',
+                                height: '22px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.3)'
+                              }}
+                              title="Remove photo"
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--accent-green)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <ShieldCheck size={14} /> {selectedFiles.length} photo(s) ready (Spec v3 max 20)
+                        </span>
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedFile(null);
-                            setPreviewUrl(null);
+                            setSelectedFiles([]);
+                            setPreviewUrls([]);
                           }}
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            right: 0,
-                            background: 'var(--accent-rose)',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '50%',
-                            width: '24px',
-                            height: '24px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.75rem', padding: '2px 8px' }}
                         >
-                          <X size={14} />
+                          Clear all
                         </button>
                       </div>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--accent-green)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <ShieldCheck size={14} /> Photo selected ({selectedFile?.name})
-                      </span>
                     </div>
                   ) : (
                     <div style={{ padding: '16px 0' }}>
                       <Camera size={36} style={{ opacity: 0.3, marginBottom: '8px' }} />
                       <p style={{ fontSize: '0.85rem', color: 'var(--text-main)', marginBottom: '4px' }}>
-                        Upload a front-facing face portrait
+                        Upload frontal face portrait(s) (1 to 20 images)
                       </p>
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginBottom: '12px' }}>
-                        JPG or PNG • Clear lighting • Sharp focus (&gt; 40px)
+                        Spec v3 Quality Gate: JPEG/PNG • Min 200×200 px • Sharp focus (blur ≥ 100) • Max 10 MB
                       </p>
                       <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
                         <input
@@ -595,6 +662,7 @@ export const PersonsPage: React.FC = () => {
                           ref={fileInputRef}
                           style={{ display: 'none' }}
                           accept="image/jpeg,image/png,image/webp"
+                          multiple
                           onChange={handleFileChange}
                         />
                         <button
@@ -603,7 +671,7 @@ export const PersonsPage: React.FC = () => {
                           className="btn btn-secondary"
                           style={{ fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                         >
-                          <Upload size={14} /> Upload Image
+                          <Upload size={14} /> Upload Images
                         </button>
                         <button
                           type="button"

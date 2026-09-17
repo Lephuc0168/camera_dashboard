@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS persons (
     student_code VARCHAR(100) UNIQUE,
     full_name VARCHAR(255) NOT NULL,
     status VARCHAR(30) NOT NULL DEFAULT 'active',
+    created_by UUID REFERENCES users(user_id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

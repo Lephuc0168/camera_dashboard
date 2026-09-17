@@ -23,6 +23,7 @@ class Person(Base):
     student_code = Column(String(100), unique=True, nullable=True)
     full_name = Column(String(255), nullable=False)
     status = Column(String(30), nullable=False, default="active")
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
