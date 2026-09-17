@@ -20,5 +20,7 @@ class PersonRead(PersonBase):
     created_at: datetime
     updated_at: datetime
     embedding_count: int = 0
+    photo_url: str | None = None
+    quality_score: float | None = None
 
     model_config = ConfigDict(from_attributes=True)

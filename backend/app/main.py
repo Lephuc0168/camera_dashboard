@@ -44,6 +44,13 @@ app.include_router(stats_router, prefix=settings.API_V1_STR)
 app.include_router(health_router)
 app.include_router(ws_router)
 
+# Mount static folder for enrolled face portraits
+import os
+from fastapi.staticfiles import StaticFiles
+static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+os.makedirs(static_dir, exist_ok=True)
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
 @app.on_event("startup")
 def on_startup():
     logger.info("Initializing database tables and seed data...")

@@ -14,6 +14,8 @@ export interface Person {
   created_at: string;
   updated_at: string;
   embedding_count: number;
+  photo_url?: string;
+  quality_score?: number;
 }
 
 export interface Camera {
