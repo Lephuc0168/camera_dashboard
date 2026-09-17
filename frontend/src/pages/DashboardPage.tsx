@@ -34,7 +34,14 @@ export const DashboardPage: React.FC = () => {
       setRecentEvents(Array.isArray(eventsRes.data) ? eventsRes.data : []);
     } catch (err: any) {
       console.error('Failed to fetch dashboard data:', err);
-      setErrorMsg(err.message || 'Failed to connect to API');
+      const detail = err.response?.data?.detail || err.response?.data?.message;
+      if (detail) {
+        setErrorMsg(detail);
+      } else if (err.message === 'Network Error') {
+        setErrorMsg('Network Error: Không thể kết nối tới Backend FastAPI (cổng 8000). Hãy kiểm tra service backend và chạy "bash scripts/fix_jetson_db.sh" trên Jetson.');
+      } else {
+        setErrorMsg(err.message || 'Failed to connect to API');
+      }
     } finally {
       setLoading(false);
     }

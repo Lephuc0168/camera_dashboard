@@ -45,6 +45,26 @@ app.include_router(stats_router, prefix=settings.API_V1_STR)
 app.include_router(internal_router, prefix=settings.API_V1_STR)
 app.include_router(health_router)
 app.include_router(ws_router)
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
+
+@app.exception_handler(OperationalError)
+async def db_operational_error_handler(request: Request, exc: OperationalError):
+    logger.error(f"Database OperationalError on {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Database connection error: Không thể kết nối tới PostgreSQL (localhost:5432). Hãy chạy lệnh 'bash scripts/fix_jetson_db.sh' trên terminal Jetson để tự động khởi động và sửa lỗi database.",
+            "error_type": "DatabaseConnectionError"
+        },
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "*"
+        }
+    )
 
 # Mount static folder for enrolled face portraits
 import os
