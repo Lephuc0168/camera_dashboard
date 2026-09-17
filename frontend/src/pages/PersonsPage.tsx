@@ -23,6 +23,8 @@ export const PersonsPage: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -49,12 +51,32 @@ export const PersonsPage: React.FC = () => {
     fetchPersons();
   }, []);
 
-  // Cleanup camera stream when closing modal
+  // Cleanup camera stream when closing modal or unmounting
   useEffect(() => {
     return () => {
       stopCamera();
     };
   }, []);
+
+  // Bind media stream to video element when camera becomes active
+  useEffect(() => {
+    if (isCameraActive && videoRef.current && mediaStreamRef.current) {
+      const video = videoRef.current;
+      video.srcObject = mediaStreamRef.current;
+      video.onloadedmetadata = () => {
+        video.play()
+          .then(() => {
+            setCameraLoading(false);
+            setIsCameraReady(true);
+          })
+          .catch((err) => {
+            console.error('Video play error:', err);
+            setErrorMsg('Webcam stream play failed: ' + err.message);
+            setCameraLoading(false);
+          });
+      };
+    }
+  }, [isCameraActive]);
 
   const stopCamera = () => {
     if (mediaStreamRef.current) {
@@ -62,41 +84,63 @@ export const PersonsPage: React.FC = () => {
       mediaStreamRef.current = null;
     }
     setIsCameraActive(false);
+    setCameraLoading(false);
+    setIsCameraReady(false);
   };
 
   const startCamera = async () => {
     try {
       setErrorMsg(null);
+      setCameraLoading(true);
+      setIsCameraReady(false);
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+        video: { 
+          width: { ideal: 1280, min: 640 }, 
+          height: { ideal: 720, min: 480 }, 
+          facingMode: 'user' 
+        }
       });
       mediaStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
       setIsCameraActive(true);
     } catch (err: any) {
-      setErrorMsg('Cannot access webcam: ' + (err.message || 'Permission denied'));
+      setErrorMsg('Cannot access webcam: ' + (err.message || 'Permission denied or camera not found'));
       setIsCameraActive(false);
+      setCameraLoading(false);
+      setIsCameraReady(false);
     }
   };
 
   const captureCameraFrame = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
+    
+    // Ensure the stream has rendered frames
+    if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+      setErrorMsg('Camera stream not ready yet. Please wait a moment.');
+      return;
+    }
+
+    const minDim = Math.min(video.videoWidth, video.videoHeight);
+    const startX = (video.videoWidth - minDim) / 2;
+    const startY = (video.videoHeight - minDim) / 2;
+
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    const targetSize = 512;
+    canvas.width = targetSize;
+    canvas.height = targetSize;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // Flip horizontally to match the mirrored selfie view
+    ctx.translate(targetSize, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, startX, startY, minDim, minDim, 0, 0, targetSize, targetSize);
+
     canvas.toBlob((blob) => {
       if (blob) {
-        const file = new File([blob], `capture_${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const file = new File([blob], `webcam_portrait_${Date.now()}.jpg`, { type: 'image/jpeg' });
         setSelectedFile(file);
-        setPreviewUrl(canvas.toDataURL('image/jpeg'));
+        setPreviewUrl(canvas.toDataURL('image/jpeg', 0.95));
         stopCamera();
       }
     }, 'image/jpeg', 0.95);
@@ -136,25 +180,49 @@ export const PersonsPage: React.FC = () => {
       setSubmitting(true);
       setErrorMsg(null);
 
-      const formData = new FormData();
-      formData.append('full_name', fullName.trim());
-      if (studentCode.trim()) {
-        formData.append('student_code', studentCode.trim());
+      // 1. Attempt Spec Section 25 full enrollment (Photo + Quality Gate + 512D ArcFace + Global EVT)
+      try {
+        const formData = new FormData();
+        formData.append('full_name', fullName.trim());
+        if (studentCode.trim()) {
+          formData.append('student_code', studentCode.trim());
+        }
+        formData.append('status_str', 'active');
+        if (selectedFile) {
+          formData.append('photo', selectedFile);
+        }
+
+        const res = await api.post('/persons/enroll', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+
+        setSuccessMsg(`Identity '${res.data.full_name}' enrolled successfully with 512D unit embedding and Global EVT Fallback!`);
+        setTimeout(() => setSuccessMsg(null), 5000);
+        handleCloseModal();
+        await fetchPersons();
+        return;
+      } catch (enrollErr: any) {
+        const status = enrollErr.response?.status;
+        // If 405 (Method Not Allowed) or 404 (Not Found), backend hasn't been synced; fallback to /persons
+        if (status === 405 || status === 404) {
+          console.warn('/persons/enroll returned HTTP ' + status + ', attempting metadata registration fallback...');
+          const fallbackRes = await api.post('/persons', {
+            full_name: fullName.trim(),
+            student_code: studentCode.trim() || undefined,
+            status: 'active'
+          });
+
+          setSuccessMsg(
+            `Identity '${fallbackRes.data.full_name}' registered successfully! (Note: Update backend on Jetson to enable live photo embedding).`
+          );
+          setTimeout(() => setSuccessMsg(null), 6000);
+          handleCloseModal();
+          await fetchPersons();
+          return;
+        }
+        // Rethrow other errors (e.g. Quality Gate validation error, duplicate code)
+        throw enrollErr;
       }
-      formData.append('status_str', 'active');
-      if (selectedFile) {
-        formData.append('photo', selectedFile);
-      }
-
-      const res = await api.post('/persons/enroll', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-
-      setSuccessMsg(`Identity '${res.data.full_name}' enrolled successfully with 512D unit embedding and Global EVT Fallback!`);
-      setTimeout(() => setSuccessMsg(null), 5000);
-
-      handleCloseModal();
-      await fetchPersons();
     } catch (err: any) {
       const detail = err.response?.data?.detail || err.message || 'Failed to enroll person';
       setErrorMsg(detail);
@@ -314,18 +382,85 @@ export const PersonsPage: React.FC = () => {
                 }}>
                   {isCameraActive ? (
                     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <video 
-                        ref={videoRef} 
-                        playsInline 
-                        muted 
-                        style={{ width: '100%', maxHeight: '240px', borderRadius: '8px', objectFit: 'cover' }} 
-                      />
-                      <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>
+                      <div style={{
+                        position: 'relative',
+                        width: '100%',
+                        maxWidth: '360px',
+                        height: '260px',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        background: '#090d16',
+                        border: '2px solid var(--border-glass-accent)',
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)'
+                      }}>
+                        <video 
+                          ref={videoRef} 
+                          autoPlay
+                          playsInline 
+                          muted 
+                          style={{ 
+                            width: '100%', 
+                            height: '100%', 
+                            objectFit: 'cover',
+                            transform: 'scaleX(-1)' // Mirror selfie view
+                          }} 
+                        />
+                        {/* Target Face Oval Frame Guide */}
+                        <div style={{
+                          position: 'absolute',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          width: '160px',
+                          height: '200px',
+                          border: '2px dashed var(--accent-cyan)',
+                          borderRadius: '50%',
+                          boxShadow: '0 0 20px rgba(6, 182, 212, 0.35)',
+                          pointerEvents: 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}>
+                          <div style={{
+                            position: 'absolute',
+                            bottom: '10px',
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            color: 'var(--accent-cyan)',
+                            background: 'rgba(0, 0, 0, 0.65)',
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            backdropFilter: 'blur(4px)'
+                          }}>
+                            Center Face Here
+                          </div>
+                        </div>
+
+                        {cameraLoading && (
+                          <div style={{
+                            position: 'absolute',
+                            inset: 0,
+                            background: 'rgba(0,0,0,0.75)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            color: 'var(--text-muted)'
+                          }}>
+                            <RefreshCw size={24} className="spin" color="var(--primary)" />
+                            <span style={{ fontSize: '0.85rem' }}>Initializing Camera...</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '10px', marginTop: '14px' }}>
                         <button 
                           type="button" 
                           onClick={captureCameraFrame} 
+                          disabled={!isCameraReady}
                           className="btn btn-primary"
-                          style={{ fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                          style={{ fontSize: '0.85rem' }}
                         >
                           <Camera size={16} /> Snap Photo
                         </button>

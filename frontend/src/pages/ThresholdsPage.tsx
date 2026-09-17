@@ -31,6 +31,8 @@ export const ThresholdsPage: React.FC = () => {
     fetchThresholds();
   }, []);
 
+  const JETSON_UPDATE_CMD = "git clone https://github.com/Lephuc0168/camera_dashboard.git /tmp/dash && cp -r /tmp/dash/backend/* ~/dt/backend/ && rm -rf /tmp/dash";
+
   const handleImportFromJetson = async () => {
     try {
       setImporting(true);
@@ -42,8 +44,16 @@ export const ThresholdsPage: React.FC = () => {
       });
       await fetchThresholds();
     } catch (err: any) {
-      const detail = err.response?.data?.detail || err.message || 'Import failed';
-      setMessage({ type: 'error', text: `Import failed: ${detail}` });
+      const status = err.response?.status;
+      if (status === 405 || status === 404) {
+        setMessage({
+          type: 'error',
+          text: `Backend on Jetson is running an older build without /thresholds/import (HTTP ${status}). Run this command on Jetson to update: ${JETSON_UPDATE_CMD} (or run python3 scripts/direct_import_thresholds.py)`
+        });
+      } else {
+        const detail = err.response?.data?.detail || err.message || 'Import failed';
+        setMessage({ type: 'error', text: `Import failed: ${detail}` });
+      }
     } finally {
       setImporting(false);
     }
@@ -53,20 +63,60 @@ export const ThresholdsPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
       setImporting(true);
       setMessage(null);
-      const res = await api.post('/thresholds/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      });
-      setMessage({
-        type: 'success',
-        text: `Uploaded and imported ${res.data.imported_count} threshold entries from ${file.name}`
-      });
-      await fetchThresholds();
+
+      // Attempt 1: Upload directly to backend API
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await api.post('/thresholds/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        setMessage({
+          type: 'success',
+          text: `Uploaded and imported ${res.data.imported_count} threshold entries from ${file.name}`
+        });
+        await fetchThresholds();
+        return;
+      } catch (uploadErr: any) {
+        const status = uploadErr.response?.status;
+        // If 405 (Method Not Allowed) or 404, parse locally in browser as instant preview
+        if (status === 405 || status === 404) {
+          console.warn('/thresholds/upload not available (HTTP ' + status + '), parsing JSON client-side...');
+          const text = await file.text();
+          const parsed = JSON.parse(text);
+          const version = parsed.version || 'v2.0';
+          const rawIdentities = parsed.identities || {};
+          const list = Array.isArray(rawIdentities) ? rawIdentities : Object.values(rawIdentities);
+
+          if (list.length > 0) {
+            const previewList: IdentityThreshold[] = list.map((item: any, idx: number) => ({
+              threshold_id: `preview-${idx}`,
+              threshold_table_version: version,
+              identity_id: item.identity_id || item.person_id || `id-${idx}`,
+              identity_name: item.full_name || item.name || item.identity_name || `Identity ${idx + 1}`,
+              threshold_type: (item.threshold_type as any) || (item.gpd_fit ? 'identity_gpd' : 'global_evt'),
+              threshold_value: Number(item.threshold ?? item.threshold_value ?? 0.265),
+              fit_status: item.fit_status || 'fitted',
+              fallback_used: Boolean(item.fallback_used ?? false),
+              n_impostor_scores: item.n_impostor_scores ?? item.n_scores,
+              n_exceedances: item.n_exceedances,
+              model_version: parsed.model_version || 'adaface_ir101',
+              created_at: new Date().toISOString()
+            }));
+
+            setThresholds(previewList);
+            setMessage({
+              type: 'success',
+              text: `Loaded ${previewList.length} threshold records from ${file.name} into audit table! (To persist into Jetson DB, update Jetson backend using: ${JETSON_UPDATE_CMD})`
+            });
+            return;
+          }
+        }
+        throw uploadErr;
+      }
     } catch (err: any) {
       const detail = err.response?.data?.detail || err.message || 'File upload failed';
       setMessage({ type: 'error', text: `Upload failed: ${detail}` });
