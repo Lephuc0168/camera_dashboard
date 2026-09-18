@@ -149,7 +149,20 @@ def import_thresholds_from_data(raw_data: dict | list, db: Session, clear_existi
                             identity_id = cand_uuid
                             matched_count += 1
                         except Exception:
-                            pass
+                            # Auto-create missing Person profile so it links cleanly and displays in Gallery
+                            clean_full_name = cand_str.replace("_", " ").strip()
+                            new_person = Person(
+                                person_id=uuid.uuid4(),
+                                full_name=clean_full_name,
+                                student_code=f"STU_{cand_str}"[:20],
+                                status="active"
+                            )
+                            db.add(new_person)
+                            db.flush()
+                            identity_id = new_person.person_id
+                            persons_by_name[clean_full_name.lower()] = new_person
+                            persons_by_name[cand_str.lower()] = new_person
+                            matched_count += 1
 
         threshold_val = float(item.get("threshold_value", item.get("threshold", item.get("value", 0.72))))
         fallback_used = bool(item.get("fallback_used", False))
