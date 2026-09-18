@@ -58,7 +58,7 @@ TARGET_DB_CANDIDATES = [
 ]
 
 # Candidate connections tới Native PostgreSQL cũ (nguồn)
-SOURCE_NATIVE_PORTS = [5444, 5432]
+SOURCE_NATIVE_PORTS = [5445, 5444, 5433]
 
 
 def get_target_db_connection():
