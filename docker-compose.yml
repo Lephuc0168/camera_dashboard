@@ -40,6 +40,7 @@ services:
       ENROLLMENT_MIN_BLUR: "100.0"
       WEBCAM_MIN_BLUR: "35.0"
     volumes:
+      - ./backend:/app
       - ./backend/static:/app/static
 
   frontend:
