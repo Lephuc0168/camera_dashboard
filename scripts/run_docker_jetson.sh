@@ -47,9 +47,8 @@ echo "  ✅ Sử dụng lệnh: $COMPOSE_CMD"
 
 # 3. Build và khởi động các container
 echo "[3/4] Đang build và khởi động các container (Postgres, Backend, Frontend, MediaMTX)..."
-# Tránh lỗi veth sandbox của BuildKit trên Jetson bằng --network host
 export DOCKER_BUILDKIT=0
-$COMPOSE_CMD build --network host || $COMPOSE_CMD build
+$COMPOSE_CMD build
 $COMPOSE_CMD up -d
 
 # 4. Kiểm tra trạng thái
