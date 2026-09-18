@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # ==============================================================================
 # One-Click Docker Deploy & Runner on NVIDIA Jetson Orin Nano
 # Thesis: Edge-based Open-Set Face Recognition (Spec v3 §18)
@@ -16,12 +16,12 @@ cd "$PROJECT_ROOT"
 
 echo "[1/4] Thư mục dự án: $PROJECT_ROOT"
 
-# 2. Kiểm tra Docker & nạp kernel module cho Jetson
-echo "[2/4] Kiểm tra Docker Engine & nạp module mạng (veth/bridge)..."
-sudo modprobe veth 2>/dev/null || true
-sudo modprobe bridge 2>/dev/null || true
-if ! grep -q "^veth" /etc/modules 2>/dev/null; then
-    echo "veth" | sudo tee -a /etc/modules >/dev/null 2>&1 || true
+# 2. Kiểm tra Docker Engine và chuẩn bị môi trường Host Network (NVIDIA Jetson Standard)
+echo "[2/4] Kiểm tra môi trường Docker (Host Network mode - Spec v3 §20)..."
+if systemctl is-active --quiet postgresql 2>/dev/null; then
+    echo "  ⚠️ Dịch vụ PostgreSQL native đang chạy trên cổng 5432."
+    echo "  >> Tạm dừng PostgreSQL native để container Postgres dùng cổng 5432..."
+    sudo systemctl stop postgresql || true
 fi
 
 if ! command -v docker &> /dev/null; then
