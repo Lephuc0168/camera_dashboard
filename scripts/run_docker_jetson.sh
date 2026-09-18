@@ -16,8 +16,14 @@ cd "$PROJECT_ROOT"
 
 echo "[1/4] Thư mục dự án: $PROJECT_ROOT"
 
-# 2. Kiểm tra Docker & Docker Compose
-echo "[2/4] Kiểm tra Docker Engine..."
+# 2. Kiểm tra Docker & nạp kernel module cho Jetson
+echo "[2/4] Kiểm tra Docker Engine & nạp module mạng (veth/bridge)..."
+sudo modprobe veth 2>/dev/null || true
+sudo modprobe bridge 2>/dev/null || true
+if ! grep -q "^veth" /etc/modules 2>/dev/null; then
+    echo "veth" | sudo tee -a /etc/modules >/dev/null 2>&1 || true
+fi
+
 if ! command -v docker &> /dev/null; then
     echo "  ❌ Docker chưa được cài đặt. Tiến hành cài đặt Docker..."
     sudo apt-get update
@@ -41,7 +47,10 @@ echo "  ✅ Sử dụng lệnh: $COMPOSE_CMD"
 
 # 3. Build và khởi động các container
 echo "[3/4] Đang build và khởi động các container (Postgres, Backend, Frontend, MediaMTX)..."
-$COMPOSE_CMD up -d --build
+# Tránh lỗi veth sandbox của BuildKit trên Jetson bằng --network host
+export DOCKER_BUILDKIT=0
+$COMPOSE_CMD build --network host || $COMPOSE_CMD build
+$COMPOSE_CMD up -d
 
 # 4. Kiểm tra trạng thái
 echo "[4/4] Trạng thái các dịch vụ đang chạy:"
