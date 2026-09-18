@@ -30,12 +30,21 @@ done
 
 # Nếu chưa chạy, bật cluster native main trên port 5445
 if [ "$RUNNING_OLD" -eq 0 ]; then
-    echo ">> Cụm Native PostgreSQL đang dừng. Đang dọn dẹp PID cũ và khởi động trên cổng 5445..."
+    echo ">> Cụm Native PostgreSQL đang dừng. Đang dọn dẹp tiến trình cũ, IPC shared memory và khởi động cổng 5445..."
+    sudo pkill -9 -f "/usr/lib/postgresql/14/bin/postgres" 2>/dev/null || true
+    for id in $(ipcs -m 2>/dev/null | awk '$3=="postgres" {print $2}'); do
+        sudo ipcrm -m "$id" 2>/dev/null || true
+    done
+    for id in $(ipcs -s 2>/dev/null | awk '$3=="postgres" {print $2}'); do
+        sudo ipcrm -s "$id" 2>/dev/null || true
+    done
+
     for pid_file in /var/lib/postgresql/*/main/postmaster.pid; do
         if [ -f "$pid_file" ]; then
             sudo rm -f "$pid_file"
         fi
     done
+    sudo rm -f /var/run/postgresql/.s.PGSQL.5445* /tmp/.s.PGSQL.5445* 2>/dev/null || true
     sudo mkdir -p /var/run/postgresql
     sudo chown -R postgres:postgres /var/run/postgresql
     sudo chmod 2775 /var/run/postgresql
@@ -45,9 +54,16 @@ if [ "$RUNNING_OLD" -eq 0 ]; then
             PG_VER=$(echo "$conf_file" | cut -d/ -f4)
             sudo sed -i "s/^port = .*/port = 5445/" "$conf_file" || true
             sudo sed -i "s/^#port = 5432/port = 5445/" "$conf_file" || true
-            sudo sed -i "s/^#listen_addresses = 'localhost'/listen_addresses = '*'/" "$conf_file" || true
-            sudo sed -i "s/^listen_addresses = 'localhost'/listen_addresses = '*'/" "$conf_file" || true
-            sudo pg_ctlcluster "$PG_VER" main restart || sudo pg_ctlcluster "$PG_VER" main start || true
+            sudo sed -i "s/^#listen_addresses = .*/listen_addresses = '*'/" "$conf_file" || true
+            sudo sed -i "s/^listen_addresses = .*/listen_addresses = '*'/" "$conf_file" || true
+
+            HBA_FILE="/etc/postgresql/$PG_VER/main/pg_hba.conf"
+            if [ -f "$HBA_FILE" ]; then
+                sudo sed -i 's/127\.0\.0\.1\/32.*scram-sha-256/127.0.0.1\/32            trust/' "$HBA_FILE" || true
+                sudo sed -i 's/127\.0\.0\.1\/32.*md5/127.0.0.1\/32            trust/' "$HBA_FILE" || true
+            fi
+
+            sudo pg_ctlcluster "$PG_VER" main start || true
         fi
     done
     sleep 2
