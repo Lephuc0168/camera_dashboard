@@ -1,74 +1,45 @@
 #!/bin/bash
 # ==============================================================================
-# Migrate all legacy data from Native PostgreSQL to Docker PostgreSQL Container
+# Migrate data from Native PostgreSQL (Port 5444) to Docker Container (Port 5432)
 # Open-Set Face Recognition Thesis Project
 # ==============================================================================
 set -e
 
-echo "===================================================================="
-echo "  📦 CHUYỂN DỮ LIỆU TỪ NATIVE POSTGRESQL SANG DOCKER CONTAINER"
-echo "===================================================================="
-
-# Đổi thư mục sang /tmp để tránh lỗi 'Permission denied' của user postgres
 cd /tmp
 
-# 1. Tạm dừng container Docker postgres để nhường cổng 5432 cho Native Postgres
-echo "[1/5] Tạm dừng container open_set_fr_postgres..."
-docker stop open_set_fr_postgres 2>/dev/null || true
-sleep 2
+echo "===================================================================="
+echo "  📦 CHUYỂN DỮ LIỆU TỪ NATIVE POSTGRES (PORT 5444) SANG DOCKER"
+echo "===================================================================="
 
-# 2. Khởi động Native Postgres và đợi đến khi sẵn sàng
-echo "[2/5] Khởi động Native PostgreSQL..."
-if command -v pg_lsclusters &>/dev/null; then
-    pg_lsclusters -h | while read -r ver name port status rest; do
-        if [ "$status" != "online" ]; then
-            echo "  >> Dọn dẹp PID cũ (nếu có) và khởi động cluster PostgreSQL $ver/$name..."
-            sudo rm -f "/var/lib/postgresql/$ver/$name/postmaster.pid" 2>/dev/null || true
-            sudo pg_ctlcluster "$ver" "$name" start || true
-        fi
-    done
+# Đảm bảo Docker postgres container đang chạy
+if ! docker ps --format '{{.Names}}' | grep -q "open_set_fr_postgres"; then
+    echo ">> Khởi động Docker container open_set_fr_postgres..."
+    docker start open_set_fr_postgres
+    sleep 3
 fi
-sudo systemctl start postgresql 2>/dev/null || true
 
-# Đợi socket sẵn sàng (tối đa 10s)
-READY=0
-for i in {1..10}; do
-    if sudo -u postgres psql -c "SELECT 1;" >/dev/null 2>&1; then
-        READY=1
-        echo "  ✅ Native PostgreSQL đã khởi động thành công!"
-        break
+PORT=5444
+# Kiểm tra xem port 5444 có đang hoạt động không
+if ! sudo -u postgres psql -p 5444 -c "SELECT 1;" >/dev/null 2>&1; then
+    echo "  >> Thử kết nối port 5432..."
+    if sudo -u postgres psql -p 5432 -c "SELECT 1;" >/dev/null 2>&1; then
+        PORT=5432
     fi
-    sleep 1
-done
-
-if [ $READY -ne 1 ]; then
-    echo "  ⚠️ Không thể kết nối tới Native PostgreSQL trên máy chủ Jetson."
-    echo "  >> Nhật ký lỗi PostgreSQL gần nhất:"
-    tail -n 15 /var/log/postgresql/postgresql-*.log 2>/dev/null || true
-    echo "  >> Khởi động lại Docker Postgres để tiếp tục sử dụng bình thường..."
-    docker start open_set_fr_postgres 2>/dev/null || true
-    exit 1
 fi
 
-# Kiểm tra xem database open_set_fr có tồn tại trên Native Postgres không
-if ! sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw "open_set_fr"; then
-    echo "  ⚠️ Không tìm thấy cơ sở dữ liệu 'open_set_fr' trong Native PostgreSQL."
-    echo "  >> Đang bật lại container Docker..."
-    sudo systemctl stop postgresql 2>/dev/null || true
-    docker start open_set_fr_postgres 2>/dev/null || true
-    echo "  Database trong Docker hiện đã sẵn sàng."
-    exit 0
-fi
+echo "  ✅ Đã phát hiện Native PostgreSQL đang chạy trên PORT: $PORT"
 
-# Kiểm tra số lượng người trong database Native
-COUNT_PERSONS=$(sudo -u postgres psql -d open_set_fr -tAc "SELECT count(*) FROM persons;" 2>/dev/null || echo "0")
-echo "  📊 Tìm thấy $COUNT_PERSONS người trong database Native cũ."
+# Kiểm tra dữ liệu trong database Native
+echo ">> Kiểm tra số lượng người trong database Native cũ..."
+COUNT_PERSONS=$(sudo -u postgres psql -p $PORT -d open_set_fr -tAc "SELECT count(*) FROM persons;" 2>/dev/null || echo "0")
+COUNT_EMB=$(sudo -u postgres psql -p $PORT -d open_set_fr -tAc "SELECT count(*) FROM face_embeddings;" 2>/dev/null || echo "0")
+echo "  📊 Dữ liệu Native cũ: $COUNT_PERSONS người, $COUNT_EMB vectors đặc trưng."
 
 DUMP_FILE="/tmp/legacy_open_set_fr_data.sql"
 rm -f "$DUMP_FILE"
 
-# Dump dữ liệu các bảng
-sudo -u postgres pg_dump -d open_set_fr --data-only \
+echo ">> Đang xuất dữ liệu từ Native PostgreSQL (port $PORT)..."
+sudo -u postgres pg_dump -p $PORT -d open_set_fr --data-only \
     -t persons \
     -t face_embeddings \
     -t cameras \
@@ -77,7 +48,7 @@ sudo -u postgres pg_dump -d open_set_fr --data-only \
     --inserts \
     --on-conflict-do-nothing \
     -f "$DUMP_FILE" 2>/dev/null || \
-sudo -u postgres pg_dump -d open_set_fr --data-only \
+sudo -u postgres pg_dump -p $PORT -d open_set_fr --data-only \
     -t persons \
     -t face_embeddings \
     -t cameras \
@@ -85,35 +56,17 @@ sudo -u postgres pg_dump -d open_set_fr --data-only \
     -t identity_thresholds \
     -f "$DUMP_FILE"
 
-echo "  ✅ Đã xuất dữ liệu ra file tạm: $DUMP_FILE"
+echo "  ✅ Xuất dữ liệu thành công ra $DUMP_FILE"
 
-# 3. Tắt Native Postgres để trả lại cổng 5432
-echo "[3/5] Tắt Native PostgreSQL..."
-sudo systemctl stop postgresql 2>/dev/null || true
-if command -v pg_lsclusters &>/dev/null; then
-    pg_lsclusters -h | while read -r ver name port status rest; do
-        sudo pg_ctlcluster "$ver" "$name" stop 2>/dev/null || true
-    done
-fi
+echo ">> Đang nạp dữ liệu vào Docker PostgreSQL container..."
+docker exec -i open_set_fr_postgres psql -U open_set_fr -d open_set_fr < "$DUMP_FILE"
 
-# 4. Bật lại Docker Postgres container
-echo "[4/5] Bật lại Docker open_set_fr_postgres container..."
-docker start open_set_fr_postgres
-sleep 3
-
-# 5. Nạp dữ liệu vào Docker Postgres
-echo "[5/5] Nạp dữ liệu vào Docker Postgres container..."
-if [ -f "$DUMP_FILE" ] && [ -s "$DUMP_FILE" ]; then
-    docker exec -i open_set_fr_postgres psql -U open_set_fr -d open_set_fr < "$DUMP_FILE" || true
-fi
-
-# Khởi động lại backend để nạp lại ma trận nhận diện khuôn mặt
-echo ">> Khởi động lại backend để nạp ma trận nhận diện..."
+echo ">> Khởi động lại Backend để nạp lại ma trận Gallery..."
 docker compose restart backend
 
 echo ""
 echo "===================================================================="
-echo "🎉 HOÀN TẤT CHUYỂN DỮ LIỆU SANG DOCKER!"
+echo "🎉 HOÀN TẤT CHUYỂN TOÀN BỘ DỮ LIỆU SANG DOCKER!"
 echo "===================================================================="
 docker exec -i open_set_fr_postgres psql -U open_set_fr -d open_set_fr -c "
 SELECT 
