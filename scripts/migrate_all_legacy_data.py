@@ -445,6 +445,7 @@ def import_evt_thresholds(target_conn):
     print("=" * 65)
 
     CANDIDATE_JSONS = [
+        "/tmp/threshold_table_jetson.json",
         os.path.join(PROJECT_ROOT, "thresholds", "threshold_table.json"),
         os.path.join(PROJECT_ROOT, "threshold_table.json"),
         os.path.expanduser("~/camera_dashboard/thresholds/threshold_table.json"),
