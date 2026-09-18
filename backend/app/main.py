@@ -85,9 +85,35 @@ async def db_operational_error_handler(request: Request, exc: OperationalError):
 # Mount static folder for enrolled face portraits
 import os
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+
 static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 os.makedirs(static_dir, exist_ok=True)
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# Mount frontend production build (if present)
+frontend_dist = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "frontend", "dist"))
+if os.path.exists(frontend_dist):
+    logger.info(f"Mounting frontend production build from: {frontend_dist}")
+    assets_dir = os.path.join(frontend_dist, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        # Don't intercept API or WS or Health or Docs routes
+        if full_path.startswith("api/") or full_path.startswith("ws/") or full_path in ("health", "docs", "redoc", "openapi.json"):
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+        
+        target_file = os.path.join(frontend_dist, full_path)
+        if full_path and os.path.isfile(target_file):
+            return FileResponse(target_file)
+        
+        index_file = os.path.join(frontend_dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        return JSONResponse(status_code=404, content={"detail": "Frontend index.html not found"})
+
 
 @app.on_event("startup")
 def on_startup():
