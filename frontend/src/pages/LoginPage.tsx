@@ -7,8 +7,8 @@ export const LoginPage: React.FC = () => {
   const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
 
   // Login fields
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('nckh@2026');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
 
   // Register fields
   const [regUsername, setRegUsername] = useState('');
