@@ -15,14 +15,16 @@ cd /tmp
 # 1. Tạm dừng container Docker postgres để nhường cổng 5432 cho Native Postgres
 echo "[1/5] Tạm dừng container open_set_fr_postgres..."
 docker stop open_set_fr_postgres 2>/dev/null || true
+sleep 2
 
 # 2. Khởi động Native Postgres và đợi đến khi sẵn sàng
 echo "[2/5] Khởi động Native PostgreSQL..."
 if command -v pg_lsclusters &>/dev/null; then
     pg_lsclusters -h | while read -r ver name port status rest; do
         if [ "$status" != "online" ]; then
-            echo "  >> Đang bật cluster PostgreSQL $ver/$name..."
-            sudo pg_ctlcluster "$ver" "$name" start 2>/dev/null || true
+            echo "  >> Dọn dẹp PID cũ (nếu có) và khởi động cluster PostgreSQL $ver/$name..."
+            sudo rm -f "/var/lib/postgresql/$ver/$name/postmaster.pid" 2>/dev/null || true
+            sudo pg_ctlcluster "$ver" "$name" start || true
         fi
     done
 fi
@@ -41,7 +43,8 @@ done
 
 if [ $READY -ne 1 ]; then
     echo "  ⚠️ Không thể kết nối tới Native PostgreSQL trên máy chủ Jetson."
-    echo "  >> Kiểm tra trạng thái: sudo systemctl status postgresql"
+    echo "  >> Nhật ký lỗi PostgreSQL gần nhất:"
+    tail -n 15 /var/log/postgresql/postgresql-*.log 2>/dev/null || true
     echo "  >> Khởi động lại Docker Postgres để tiếp tục sử dụng bình thường..."
     docker start open_set_fr_postgres 2>/dev/null || true
     exit 1
