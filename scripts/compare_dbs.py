@@ -71,9 +71,10 @@ def connect_docker():
 
 def connect_native():
     candidate_passwords = ["open_set_fr_pass", "nckh@2026", "postgres", "open_set_fr", ""]
-    candidate_users = ["open_set_fr", "postgres"]
+    candidate_users = ["postgres", "open_set_fr"]
     candidate_hosts = ["127.0.0.1", "localhost", "/var/run/postgresql"]
 
+    last_error = None
     for port in CANDIDATE_OLD_PORTS:
         for host in candidate_hosts:
             for u in candidate_users:
@@ -88,24 +89,37 @@ def connect_native():
                                     conn_str += f" password={p}"
                             conn = psycopg2.connect(conn_str)
                             
-                            # Kiểm tra xem database hiện tại có bảng persons không
+                            # Tìm database có dữ liệu phong phú nhất
                             cur = conn.cursor()
-                            cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'persons');")
-                            has_persons = cur.fetchone()[0]
+                            cur.execute("SELECT datname FROM pg_database WHERE datistemplate = false;")
+                            all_dbs = [r[0] for r in cur.fetchall()]
                             cur.close()
 
-                            if not has_persons and db != "open_set_fr":
-                                # Thử xem database open_set_fr có tồn tại không
+                            best_db = db
+                            best_cnt = 0
+                            for cand_db in all_dbs:
                                 try:
-                                    conn_alt = psycopg2.connect(conn_str.replace("dbname=postgres", "dbname=open_set_fr"))
-                                    return conn_alt, f"host={host} port={port} db=open_set_fr user={u}"
+                                    test_str = conn_str.replace(f"dbname={db}", f"dbname={cand_db}")
+                                    t_conn = psycopg2.connect(test_str)
+                                    t_cur = t_conn.cursor()
+                                    t_cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'persons');")
+                                    if t_cur.fetchone()[0]:
+                                        t_cur.execute("SELECT count(*) FROM persons;")
+                                        cnt = t_cur.fetchone()[0]
+                                        if cnt >= best_cnt:
+                                            best_cnt = cnt
+                                            best_db = cand_db
+                                    t_cur.close()
+                                    t_conn.close()
                                 except Exception:
                                     pass
 
-                            return conn, f"host={host} port={port} db={db} user={u}"
-                        except Exception:
+                            final_conn = psycopg2.connect(conn_str.replace(f"dbname={db}", f"dbname={best_db}"))
+                            return final_conn, f"host={host} port={port} db={best_db} user={u}"
+                        except Exception as e:
+                            last_error = str(e).strip()
                             continue
-    return None, None
+    return None, last_error
 
 
 def get_table_count(conn, table_name):
@@ -184,10 +198,11 @@ def main():
     # 2. Kết nối Native DB (Cũ)
     native_conn, native_info = connect_native()
     if not native_conn:
-        print(f"\n{YELLOW}⚠️ Không tìm thấy service Native PostgreSQL đang chạy trên các cổng {CANDIDATE_OLD_PORTS}.{RESET}")
-        print("   👉 Nếu cụm Native đang dừng, hãy chạy lệnh sau để khởi động lại cụm Native:")
-        print(f"      {BOLD}bash scripts/recover_native_db.sh{RESET}")
-        print("   Hoặc kiểm tra danh sách cụm bằng: pg_lsclusters\n")
+        print(f"\n{YELLOW}⚠️ Không thể kết nối tới Native PostgreSQL trên các cổng {CANDIDATE_OLD_PORTS}.{RESET}")
+        if native_info:
+            print(f"   👉 Chi tiết lỗi kết nối: {BOLD}{native_info}{RESET}")
+        print("   👉 Gợi ý: Hãy chạy lại bằng lệnh:")
+        print(f"      {BOLD}bash scripts/compare_dbs.sh{RESET}")
         
         # In thông tin bảng hiện tại của Docker DB
         print("=" * 80)

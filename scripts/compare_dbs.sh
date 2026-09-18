@@ -69,10 +69,21 @@ if [ "$RUNNING_OLD" -eq 0 ]; then
     sleep 2
 fi
 
-# 3. Cài đặt psycopg2 nếu thiếu
+# 3. Đảm bảo pg_hba.conf cho phép trust trên localhost để script Python kết nối được
+for hba in /etc/postgresql/*/main/pg_hba.conf; do
+    if [ -f "$hba" ]; then
+        if ! grep -q "Antigravity Trust" "$hba"; then
+            echo ">> Cấp quyền kết nối trust nội bộ trong $hba..."
+            sudo sed -i '1s/^/# Antigravity Trust\nhost all all 127.0.0.1\/32 trust\nlocal all all trust\n/' "$hba" || true
+            sudo pg_ctlcluster 14 main reload 2>/dev/null || true
+        fi
+    fi
+done
+
+# 4. Cài đặt psycopg2 nếu thiếu
 if ! python3 -c "import psycopg2" 2>/dev/null; then
     pip3 install psycopg2-binary --quiet 2>/dev/null || true
 fi
 
-# 4. Chạy script đối chiếu
+# 5. Chạy script đối chiếu
 python3 "$PROJECT_ROOT/scripts/compare_dbs.py" "$@"
