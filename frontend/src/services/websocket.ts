@@ -8,10 +8,18 @@ export class InferenceWebSocket {
   private reconnectTimer: any = null;
   constructor(onMessage: (data: WebSocketInferencePayload) => void) {
     const customIp = localStorage.getItem('custom_backend_ip');
-    const defaultHost = customIp || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? '10.39.4.131:8000' : `${window.location.hostname}:8000`);
-    const host = (import.meta as any).env?.VITE_WS_HOST || defaultHost;
+    let host = window.location.host;
+
+    if (customIp) {
+      host = `${customIp}:8000`;
+    } else if ((import.meta as any).env?.DEV) {
+      const hostname = window.location.hostname || 'localhost';
+      host = `${hostname}:8000`;
+    }
+
+    const wsHost = (import.meta as any).env?.VITE_WS_HOST || host;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.url = `${protocol}//${host}/ws/inference`;
+    this.url = `${protocol}//${wsHost}/ws/inference`;
     this.onMessageCallback = onMessage;
   }
 

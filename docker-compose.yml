@@ -19,6 +19,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - fr_network
 
   backend:
     build:
@@ -32,8 +34,14 @@ services:
     environment:
       DATABASE_URL: postgresql://open_set_fr:open_set_fr_pass@postgres:5432/open_set_fr
       JWT_SECRET: super_secret_open_set_fr_jwt_key_2026
+      ENROLLMENT_MIN_BLUR: "100.0"
+      WEBCAM_MIN_BLUR: "35.0"
+    volumes:
+      - ./backend/static:/app/static
     ports:
       - "8000:8000"
+    networks:
+      - fr_network
 
   frontend:
     build:
@@ -45,6 +53,25 @@ services:
       - backend
     ports:
       - "3000:80"
+    networks:
+      - fr_network
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: open_set_fr_mediamtx
+    restart: always
+    ports:
+      - "8554:8554"    # RTSP Server
+      - "8889:8889"    # WebRTC (WHEP / WHIP)
+      - "8888:8888"    # HLS Stream
+    volumes:
+      - ./configs/mediamtx.yml:/mediamtx.yml
+    networks:
+      - fr_network
+
+networks:
+  fr_network:
+    driver: bridge
 
 volumes:
   postgres_data:

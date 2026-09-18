@@ -1,8 +1,17 @@
 import axios from 'axios';
 
 const customIp = localStorage.getItem('custom_backend_ip');
-const defaultBackendHost = customIp || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' ? '10.39.4.131:8000' : `${window.location.hostname}:8000`);
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || `http://${defaultBackendHost}/api`;
+let defaultApiBase = '/api';
+
+if (customIp) {
+  defaultApiBase = `http://${customIp}:8000/api`;
+} else if ((import.meta as any).env?.DEV) {
+  // During local development (Vite dev server on port 5173)
+  const host = window.location.hostname || 'localhost';
+  defaultApiBase = `http://${host}:8000/api`;
+}
+
+export const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || defaultApiBase;
 
 
 export const api = axios.create({
