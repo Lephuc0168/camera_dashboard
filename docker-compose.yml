@@ -57,7 +57,8 @@ services:
   mediamtx:
     image: bluenviron/mediamtx:latest
     container_name: open_set_fr_mediamtx
-    restart: always
+    restart: unless-stopped
+    profiles: ["stream"]
     network_mode: host
     volumes:
       - ./configs/mediamtx.yml:/mediamtx.yml

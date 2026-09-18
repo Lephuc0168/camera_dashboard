@@ -1,4 +1,4 @@
-﻿# MediaMTX Configuration for Jetson Face Recognition WebRTC
+# MediaMTX Configuration for Jetson Face Recognition WebRTC
 # Spec Section 17 & 18
 logLevel: info
 logDestinations: [stdout]
@@ -18,4 +18,4 @@ hls: yes
 hlsAddress: :8888
 
 paths:
-  all_others:
+  all_others: {}
