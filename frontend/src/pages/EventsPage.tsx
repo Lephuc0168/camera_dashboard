@@ -11,8 +11,8 @@ export const EventsPage: React.FC = () => {
   const [fallbackFilter, setFallbackFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
-  const fetchEvents = async () => {
-    setLoading(true);
+  const fetchEvents = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const params = new URLSearchParams();
       if (statusFilter) params.append('status', statusFilter);
@@ -25,12 +25,19 @@ export const EventsPage: React.FC = () => {
     } catch (err) {
       console.error('Failed to fetch events:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchEvents();
+
+    // Auto-refresh events every 3 seconds for real-time live monitoring
+    const interval = setInterval(() => {
+      fetchEvents(true);
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, [statusFilter, thresholdTypeFilter, fallbackFilter]);
 
   return (
@@ -42,7 +49,7 @@ export const EventsPage: React.FC = () => {
             Historical record of all open-set recognition decisions stored in Jetson PostgreSQL
           </p>
         </div>
-        <button onClick={fetchEvents} className="glass-button" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'white', border: '1px solid var(--border-glass)' }}>
+        <button onClick={() => fetchEvents()} className="glass-button" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'white', border: '1px solid var(--border-glass)' }}>
           <RefreshCw size={16} /> Refresh Log
         </button>
       </div>
