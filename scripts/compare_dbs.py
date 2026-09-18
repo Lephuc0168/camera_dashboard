@@ -476,6 +476,63 @@ def main():
         except Exception as e:
             docker_conn.rollback()
 
+        # 7.6 Bù Identity Thresholds (Toàn bộ 42 bản ghi từ DB Cũ)
+        try:
+            s_cur.execute("SELECT * FROM identity_thresholds;")
+            thr_rows = s_cur.fetchall()
+            if thr_rows:
+                t_cur.execute("DELETE FROM identity_thresholds;")
+                synced_thr = 0
+                json_export_identities = []
+                global_evt_item = None
+                fixed_item = None
+
+                for t in thr_rows:
+                    t_cur.execute("""
+                        INSERT INTO identity_thresholds (
+                            threshold_id, threshold_table_version, identity_id, threshold_type,
+                            threshold_value, fallback_used, n_impostor_scores, n_exceedances,
+                            u_quantile, u_value, alpha, gpd_shape, gpd_scale, fit_status,
+                            model_version, created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                    """, (
+                        t.get("threshold_id"), t.get("threshold_table_version"), t.get("identity_id"),
+                        t.get("threshold_type"), t.get("threshold_value"), t.get("fallback_used", False),
+                        t.get("n_impostor_scores"), t.get("n_exceedances"), t.get("u_quantile"),
+                        t.get("u_value"), t.get("alpha"), t.get("gpd_shape"), t.get("gpd_scale"),
+                        t.get("fit_status"), t.get("model_version"), t.get("created_at")
+                    ))
+                    synced_thr += 1
+
+                    if t.get("threshold_type") == "global_evt":
+                        global_evt_item = dict(t)
+                    elif t.get("threshold_type") == "fixed":
+                        fixed_item = dict(t)
+                    else:
+                        json_export_identities.append(dict(t))
+
+                docker_conn.commit()
+                print(f"  ✅ Đã đồng bộ trọn vẹn {synced_thr} bản ghi ngưỡng EVT/GPD từ DB Cũ sang DB Mới!")
+
+                # Đồng bộ luôn ra file thresholds/threshold_table.json
+                try:
+                    json_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "thresholds", "threshold_table.json")
+                    export_payload = {
+                        "schema_version": "1.0",
+                        "metadata": {"model_checkpoint_hash": "w600k_r50", "precision_mode": "fp16"},
+                        "global_evt": global_evt_item or {"threshold_value": 0.650},
+                        "fixed": fixed_item or {"threshold_value": 0.600},
+                        "identities": json_export_identities
+                    }
+                    with open(json_path, "w", encoding="utf-8") as jf:
+                        json.dump(export_payload, jf, indent=2, ensure_ascii=False, default=str)
+                    print(f"  💾 Đã đồng bộ file cấu hình gốc: {json_path}")
+                except Exception as e_json:
+                    pass
+        except Exception as e:
+            print(f"  ⚠️ Lỗi đồng bộ ngưỡng: {e}")
+            docker_conn.rollback()
+
         t_cur.close()
         s_cur.close()
 

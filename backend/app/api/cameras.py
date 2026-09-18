@@ -12,9 +12,9 @@ router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
 def generate_camera_stream(camera_id: str):
     cid_clean = camera_id.lower().strip()
-    if cid_clean in ["camera-0", "camera_0", "0", "csi", "camera_1"]:
+    if cid_clean in ["camera-0", "camera_0", "camera_01", "0", "csi", "camera_1"]:
         target_cid = "camera_1"
-    elif cid_clean in ["camera-1", "camera_2", "1", "rtsp"]:
+    elif cid_clean in ["camera-1", "camera_02", "camera_2", "1", "rtsp"]:
         target_cid = "camera_2"
     else:
         target_cid = camera_id
@@ -22,7 +22,11 @@ def generate_camera_stream(camera_id: str):
     # Try local port 5001 (DeepStream face_api_server), then port 5000 (legacy app.py)
     urls_to_try = [
         f"http://127.0.0.1:5001/video_feed/{target_cid}",
-        f"http://127.0.0.1:5000/video_feed/{target_cid}"
+        f"http://127.0.0.1:5001/video_feed/{camera_id}",
+        f"http://127.0.0.1:5000/video_feed/{target_cid}",
+        f"http://127.0.0.1:5000/video_feed/{camera_id}",
+        f"http://127.0.0.1:5001/video_feed",
+        f"http://127.0.0.1:5000/video_feed"
     ]
     
     for url in urls_to_try:

@@ -49,8 +49,15 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
   const liveFps = currentFeed?.fps ?? fps;
 
   const jetsonIp = localStorage.getItem('custom_backend_ip')?.split(':')[0] || '10.39.4.131';
+  let effectiveCid = active || 'camera_1';
+  if (effectiveCid === 'camera_01') effectiveCid = 'camera_1';
+  else if (effectiveCid === 'camera_02') effectiveCid = 'camera_2';
+
+  const proxyUrl = `http://${jetsonIp}:8000/api/v1/cameras/stream/${effectiveCid}`;
+  const directUrl = `http://${jetsonIp}:5001/video_feed/${effectiveCid}`;
+
   const fallbackStreamUrl = currentFeed?.streamUrl
-    || (active ? `http://${jetsonIp}:5001/video_feed/${active}` : FALLBACK_STREAM_URL);
+    || (streamError ? proxyUrl : directUrl);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
