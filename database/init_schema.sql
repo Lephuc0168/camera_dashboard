@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Seed default Admin User (admin / admin)
+INSERT INTO users (username, password_hash, role, is_active)
+VALUES ('admin', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'admin', true)
+ON CONFLICT (username) DO NOTHING;
+
 -- 2. Persons Table (Enrolled Identities)
 CREATE TABLE IF NOT EXISTS persons (
     person_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
