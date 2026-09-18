@@ -30,15 +30,27 @@ done
 
 # Nếu chưa chạy, bật cluster native main trên port 5445
 if [ "$RUNNING_OLD" -eq 0 ]; then
-    echo ">> Cụm Native PostgreSQL đang dừng. Đang thử khởi động trên cổng phụ 5445..."
+    echo ">> Cụm Native PostgreSQL đang dừng. Đang dọn dẹp PID cũ và khởi động trên cổng 5445..."
+    for pid_file in /var/lib/postgresql/*/main/postmaster.pid; do
+        if [ -f "$pid_file" ]; then
+            sudo rm -f "$pid_file"
+        fi
+    done
+    sudo mkdir -p /var/run/postgresql
+    sudo chown -R postgres:postgres /var/run/postgresql
+    sudo chmod 2775 /var/run/postgresql
+
     for conf_file in /etc/postgresql/*/main/postgresql.conf; do
         if [ -f "$conf_file" ]; then
             PG_VER=$(echo "$conf_file" | cut -d/ -f4)
             sudo sed -i "s/^port = .*/port = 5445/" "$conf_file" || true
             sudo sed -i "s/^#port = 5432/port = 5445/" "$conf_file" || true
-            sudo pg_ctlcluster "$PG_VER" main start 2>/dev/null || true
+            sudo sed -i "s/^#listen_addresses = 'localhost'/listen_addresses = '*'/" "$conf_file" || true
+            sudo sed -i "s/^listen_addresses = 'localhost'/listen_addresses = '*'/" "$conf_file" || true
+            sudo pg_ctlcluster "$PG_VER" main restart || sudo pg_ctlcluster "$PG_VER" main start || true
         fi
     done
+    sleep 2
 fi
 
 # 3. Cài đặt psycopg2 nếu thiếu

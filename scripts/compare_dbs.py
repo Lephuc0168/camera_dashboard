@@ -72,20 +72,39 @@ def connect_docker():
 def connect_native():
     candidate_passwords = ["open_set_fr_pass", "nckh@2026", "postgres", "open_set_fr", ""]
     candidate_users = ["open_set_fr", "postgres"]
-    candidate_dbs = ["open_set_fr", "postgres"]
+    candidate_hosts = ["127.0.0.1", "localhost", "/var/run/postgresql"]
 
     for port in CANDIDATE_OLD_PORTS:
-        for u in candidate_users:
-            for p in candidate_passwords:
-                for db in candidate_dbs:
-                    try:
-                        conn_str = f"host=127.0.0.1 port={port} dbname={db} user={u} connect_timeout=2"
-                        if p:
-                            conn_str += f" password={p}"
-                        conn = psycopg2.connect(conn_str)
-                        return conn, f"port={port} db={db} user={u}"
-                    except Exception:
-                        continue
+        for host in candidate_hosts:
+            for u in candidate_users:
+                for p in candidate_passwords:
+                    for db in ["open_set_fr", "postgres"]:
+                        try:
+                            if host.startswith("/"):
+                                conn_str = f"host={host} port={port} dbname={db} user={u} connect_timeout=2"
+                            else:
+                                conn_str = f"host={host} port={port} dbname={db} user={u} connect_timeout=2"
+                                if p:
+                                    conn_str += f" password={p}"
+                            conn = psycopg2.connect(conn_str)
+                            
+                            # Kiểm tra xem database hiện tại có bảng persons không
+                            cur = conn.cursor()
+                            cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'persons');")
+                            has_persons = cur.fetchone()[0]
+                            cur.close()
+
+                            if not has_persons and db != "open_set_fr":
+                                # Thử xem database open_set_fr có tồn tại không
+                                try:
+                                    conn_alt = psycopg2.connect(conn_str.replace("dbname=postgres", "dbname=open_set_fr"))
+                                    return conn_alt, f"host={host} port={port} db=open_set_fr user={u}"
+                                except Exception:
+                                    pass
+
+                            return conn, f"host={host} port={port} db={db} user={u}"
+                        except Exception:
+                            continue
     return None, None
 
 
