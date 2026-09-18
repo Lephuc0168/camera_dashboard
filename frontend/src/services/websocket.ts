@@ -11,7 +11,11 @@ export class InferenceWebSocket {
     let host = window.location.host;
 
     if (customIp) {
-      host = `${customIp}:8000`;
+      let cleanIp = customIp.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      if (!cleanIp.includes(':')) {
+        cleanIp = `${cleanIp}:8000`;
+      }
+      host = cleanIp;
     } else if ((import.meta as any).env?.DEV) {
       const hostname = window.location.hostname || 'localhost';
       host = `${hostname}:8000`;

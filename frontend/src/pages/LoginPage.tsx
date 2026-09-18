@@ -22,7 +22,9 @@ export const LoginPage: React.FC = () => {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
 
   // Common states
-  const [serverIp, setServerIp] = useState(localStorage.getItem('custom_backend_ip') || '10.39.4.131:8000');
+  const [serverIp, setServerIp] = useState(
+    localStorage.getItem('custom_backend_ip') || (window.location.hostname ? `${window.location.hostname}:8000` : 'localhost:8000')
+  );
   const [showIpConfig, setShowIpConfig] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');

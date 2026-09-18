@@ -4,7 +4,11 @@ const customIp = localStorage.getItem('custom_backend_ip');
 let defaultApiBase = '/api';
 
 if (customIp) {
-  defaultApiBase = `http://${customIp}:8000/api`;
+  let cleanIp = customIp.trim().replace(/^https?:\/\//, '').replace(/\/api\/?$/, '').replace(/\/+$/, '');
+  if (!cleanIp.includes(':')) {
+    cleanIp = `${cleanIp}:8000`;
+  }
+  defaultApiBase = `http://${cleanIp}/api`;
 } else if ((import.meta as any).env?.DEV) {
   // During local development (Vite dev server on port 5173)
   const host = window.location.hostname || 'localhost';
