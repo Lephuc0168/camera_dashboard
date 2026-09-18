@@ -41,7 +41,7 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
 
   const [activeCam, setActiveCam] = useState<string | null>(null);
   const active = activeCam && feedKeys.includes(activeCam) ? activeCam : (orderedKeys[0] || null);
-  const [useProxy, setUseProxy] = useState(false);
+  const [streamError, setStreamError] = useState(false);
 
   const currentFeed = active ? feeds?.[active] : undefined;
   const liveFrame = currentFeed?.frameBase64 ?? (active ? undefined : frameBase64);
@@ -57,7 +57,7 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
   const directUrl = `http://${jetsonIp}:5001/video_feed/${effectiveCid}`;
 
   const fallbackStreamUrl = currentFeed?.streamUrl
-    || (useProxy ? proxyUrl : directUrl);
+    || (streamError ? proxyUrl : directUrl);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -148,17 +148,14 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
     draw();
   }, [draw, liveFrame]);
 
-  const [loadError, setLoadError] = useState(false);
-
   const handleImgLoad = useCallback(() => {
-    setLoadError(false);
+    setStreamError(false);
     draw();
   }, [draw]);
 
   const handleSwitchCam = (cam: string) => {
     setActiveCam(cam);
-    setUseProxy(false);
-    setLoadError(false);
+    setStreamError(false);
     videoSizeRef.current = null;
   };
 
@@ -169,6 +166,15 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
     ro.observe(container);
     return () => ro.disconnect();
   }, [draw]);
+
+  useEffect(() => {
+    if (streamError) {
+      const timer = setTimeout(() => {
+        setStreamError(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [streamError]);
 
   const activeImageSrc = liveFrame
     ? (liveFrame.startsWith('data:') ? liveFrame : `data:image/jpeg;base64,${liveFrame}`)
@@ -262,17 +268,12 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
 
         {activeImageSrc && (
           <img
+            key={streamError ? 'err' : 'live'}
             ref={imgRef}
             src={activeImageSrc}
             alt="Live Camera Feed"
             onLoad={handleImgLoad}
-            onError={() => {
-              if (!useProxy) {
-                setUseProxy(true);
-              } else {
-                setLoadError(true);
-              }
-            }}
+            onError={() => setStreamError(true)}
             style={{
               position: 'absolute',
               inset: 0,
@@ -280,7 +281,7 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
               height: '100%',
               objectFit: 'cover',
               zIndex: 5,
-              opacity: loadError && !liveFrame ? 0.15 : 1
+              opacity: streamError && !liveFrame ? 0.15 : 1
             }}
           />
         )}
@@ -318,8 +319,8 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
             width: '8px',
             height: '8px',
             borderRadius: '50%',
-            background: (!loadError || liveFrame) ? '#10b981' : '#f59e0b',
-            boxShadow: (!loadError || liveFrame) ? '0 0 8px #10b981' : '0 0 8px #f59e0b'
+            background: (!streamError || liveFrame) ? '#10b981' : '#f59e0b',
+            boxShadow: (!streamError || liveFrame) ? '0 0 8px #10b981' : '0 0 8px #f59e0b'
           }} />
           <span>LIVE {active ? (camNames[active] || active).toUpperCase() : 'CAMERA'}</span>
           <span style={{ color: 'var(--text-dim)', marginLeft: '6px' }}>{safeFps.toFixed(1)} FPS</span>

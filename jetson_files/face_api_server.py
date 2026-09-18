@@ -96,52 +96,36 @@ def api_stats():
 def api_faces(camera_id=None):
     if _faces_cache is None:
         return jsonify({"status": "error", "faces": [], "count": 0})
-    
-    # Rút ngắn thời gian giữ lock < 0.001ms
-    targets = []
     with _faces_lock:
         if camera_id:
             data = _faces_cache.get(camera_id)
             if data and (time.time() - data.get("timestamp", 0)) < 5.0:
-                targets.append((camera_id, data.get("frame"), data.get("boxes", [])))
-        else:
-            for cid, data in _faces_cache.items():
-                if time.time() - data.get("timestamp", 0) < 5.0:
-                    targets.append((cid, data.get("frame"), data.get("boxes", [])))
-    
-    # Thực hiện crop ngoài lock để không nghẽn pipeline
-    if camera_id:
-        if targets and targets[0][1] is not None:
-            faces = _crop_faces(targets[0][1], targets[0][2])
-            return jsonify({"status": "success", "faces": faces, "count": len(faces)})
-        return jsonify({"status": "success", "faces": [], "count": 0})
-    
-    result = {}
-    for cid, frm, bxs in targets:
-        if frm is not None:
-            faces = _crop_faces(frm, bxs)
-            result[cid] = {"faces": faces, "count": len(faces)}
-    return jsonify({"status": "success", "cameras": result})
+                faces = _crop_faces(data["frame"], data.get("boxes", []))
+                return jsonify({"status": "success", "faces": faces, "count": len(faces)})
+            return jsonify({"status": "success", "faces": [], "count": 0})
+        result = {}
+        for cid, data in _faces_cache.items():
+            if time.time() - data.get("timestamp", 0) < 5.0:
+                faces = _crop_faces(data["frame"], data.get("boxes", []))
+                result[cid] = {"faces": faces, "count": len(faces)}
+        return jsonify({"status": "success", "cameras": result})
 
 
 @app.route('/video_feed')
 @app.route('/video_feed/<camera_id>')
 def video_feed(camera_id=None):
-    """Phát trực tiếp luồng video camera (tối ưu hóa zero-lock, tiết kiệm 70% CPU Jetson)."""
+    """Phát trực tiếp luồng video camera (hỗ trợ chọn Camera-0 hoặc Camera-1)."""
     def generate():
-        last_frame_bytes = None
-        last_ts = 0
         while True:
-            frame_to_process = None
+            frame_bytes = None
             if _faces_cache is not None:
-                # BƯỚC 1: Rút ngắn thời gian giữ lock < 0.001ms (chỉ lấy reference)
                 with _faces_lock:
                     target_cid = None
                     if camera_id:
                         cid_clean = camera_id.lower().strip()
-                        if cid_clean in ["camera-0", "camera_0", "camera_01", "0", "csi", "camera_1"]:
+                        if cid_clean in ["camera-0", "camera_0", "0", "csi"]:
                             target_cid = "camera_1" if "camera_1" in _faces_cache else None
-                        elif cid_clean in ["camera-1", "camera_02", "camera_2", "1", "rtsp"] and "camera_2" in _faces_cache:
+                        elif cid_clean in ["camera-1", "1", "rtsp"] and "camera_2" in _faces_cache:
                             target_cid = "camera_2"
                         else:
                             for k in _faces_cache.keys():
@@ -153,39 +137,24 @@ def video_feed(camera_id=None):
 
                     if target_cid and target_cid in _faces_cache:
                         data = _faces_cache[target_cid]
-                        cur_ts = data.get("timestamp", 0)
                         if "frame" in data and data["frame"] is not None:
-                            if cur_ts != last_ts or last_frame_bytes is None:
-                                frame_to_process = data["frame"]
-                                last_ts = cur_ts
-
-            # BƯỚC 2: Xử lý và nén JPEG HOÀN TOÀN NGOÀI LOCK
-            if frame_to_process is not None:
-                try:
-                    h, w = frame_to_process.shape[:2]
-                    # Downscale cho web preview nếu độ phân giải > 1280 (tiết kiệm 65% tải CPU)
-                    if w > 1280:
-                        scale = 1280.0 / w
-                        frame_resized = cv2.resize(frame_to_process, (1280, int(h * scale)), interpolation=cv2.INTER_LINEAR)
-                    else:
-                        frame_resized = frame_to_process
-
-                    if len(frame_resized.shape) == 3 and frame_resized.shape[2] == 4:
-                        frame_bgr = cv2.cvtColor(frame_resized, cv2.COLOR_RGBA2BGR)
-                    else:
-                        frame_bgr = frame_resized
-                    ret, buf = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                    if ret:
-                        last_frame_bytes = buf.tobytes()
-                except Exception:
-                    pass
-
-            if last_frame_bytes:
+                            frame = data["frame"]
+                            try:
+                                if len(frame.shape) == 3 and frame.shape[2] == 4:
+                                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                                else:
+                                    frame_bgr = frame
+                                ret, buf = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                                if ret:
+                                    frame_bytes = buf.tobytes()
+                            except Exception:
+                                pass
+            if frame_bytes:
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + last_frame_bytes + b'\r\n')
-                time.sleep(0.04) # 25 FPS mượt mà
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                time.sleep(0.033)
             else:
-                time.sleep(0.05)
+                time.sleep(0.04)
 
     res = Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
     res.headers['Access-Control-Allow-Origin'] = '*'
