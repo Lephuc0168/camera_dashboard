@@ -142,9 +142,14 @@ def on_startup():
             )
             db.add(admin)
             db.commit()
-        elif admin_user.role != "admin":
-            logger.info("Enforcing role='admin' for default admin user...")
+        else:
+            logger.info("Enforcing role='admin', is_active=True and ensuring valid password for admin user...")
             admin_user.role = "admin"
+            admin_user.is_active = True
+            from app.auth.password import verify_password
+            if not verify_password("nckh@2026", admin_user.password_hash) and not verify_password("admin", admin_user.password_hash):
+                logger.info("Resetting admin user password hash to default 'nckh@2026'...")
+                admin_user.password_hash = get_password_hash("nckh@2026")
             db.commit()
             
         # Seed default Camera if not exists
