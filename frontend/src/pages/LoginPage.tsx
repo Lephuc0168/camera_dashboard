@@ -270,7 +270,7 @@ export const LoginPage: React.FC = () => {
 
         {/* 1. LOGIN MODE */}
         {mode === 'login' && (
-          <form onSubmit={handleLogin}>
+          <form onSubmit={handleLogin} autoComplete="off">
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
                 Username
@@ -279,8 +279,10 @@ export const LoginPage: React.FC = () => {
                 <UserIcon size={18} color="var(--text-dim)" style={{ position: 'absolute', left: '12px', top: '12px' }} />
                 <input
                   type="text"
+                  placeholder="Nhập tên đăng nhập"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
                   required
                   style={{
                     width: '100%',
@@ -304,8 +306,10 @@ export const LoginPage: React.FC = () => {
                 <Lock size={18} color="var(--text-dim)" style={{ position: 'absolute', left: '12px', top: '12px' }} />
                 <input
                   type="password"
+                  placeholder="Nhập mật khẩu"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
                   required
                   style={{
                     width: '100%',
@@ -538,7 +542,7 @@ export const LoginPage: React.FC = () => {
                 <KeyRound size={18} color="var(--text-dim)" style={{ position: 'absolute', left: '12px', top: '12px' }} />
                 <input
                   type="password"
-                  placeholder="Mặc định: nckh@2026"
+                  placeholder="Nhập mã bảo mật (Master Key)"
                   value={recoveryCode}
                   onChange={(e) => setRecoveryCode(e.target.value)}
                   required

@@ -49,6 +49,8 @@ services:
     container_name: open_set_fr_frontend
     restart: always
     network_mode: host
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
     depends_on:
       - backend
 
