@@ -1,7 +1,7 @@
 ﻿#!/bin/bash
 # ==============================================================================
-# Password Reset Tool & Frontend Hot-Patch
-# Allows changing password for any user and ensures frontend is completely updated
+# Password Reset Tool & Security Hot-Patch
+# Thesis: Edge-based Open-Set Face Recognition on NVIDIA Jetson Orin Nano
 # ==============================================================================
 set -e
 
@@ -26,20 +26,32 @@ if [ -z "$NEW_PASS" ]; then
 fi
 
 echo ""
-echo ">> [1/3] Cập nhật giao diện Frontend mới nhất vào Docker container..."
-if docker ps --format '{{.Names}}' | grep -q "open_set_fr_frontend"; then
-    docker cp "$PROJECT_ROOT/frontend/dist/." open_set_fr_frontend:/usr/share/nginx/html/ 2>/dev/null || true
-    echo "  ✅ Đã đồng bộ giao diện sạch (không lưu sẵn mật khẩu) vào Frontend container."
+echo ">> [1/4] Khóa cứng Backend: Loại bỏ vĩnh viễn backdoor tự động reset mật khẩu..."
+if docker ps --format '{{.Names}}' | grep -q "open_set_fr_backend"; then
+    docker cp "$PROJECT_ROOT/backend/app/api/auth.py" open_set_fr_backend:/app/app/api/auth.py
+    docker cp "$PROJECT_ROOT/backend/app/auth/password.py" open_set_fr_backend:/app/app/auth/password.py
+    echo "  ✅ Đã chép nóng auth.py sạch vào Backend container."
 fi
 
-echo ">> [2/3] Cập nhật mật khẩu mới bằng Bcrypt trong Database..."
-docker exec -i open_set_fr_backend python3 -c "
-import bcrypt
+echo ">> [2/4] Đồng bộ giao diện sạch vào Frontend container..."
+if docker ps --format '{{.Names}}' | grep -q "open_set_fr_frontend"; then
+    docker cp "$PROJECT_ROOT/frontend/dist/." open_set_fr_frontend:/usr/share/nginx/html/ 2>/dev/null || true
+    echo "  ✅ Đã đồng bộ giao diện sạch vào Frontend container."
+fi
+
+echo ">> [3/4] Cập nhật mật khẩu mới bằng Bcrypt trong Database..."
+docker exec -e USER_TARGET="$USER_TARGET" -e NEW_PASS="$NEW_PASS" -i open_set_fr_backend python3 -c "
+import os, bcrypt
 from app.db.database import SessionLocal
 from app.db.models import User
+from app.auth.password import verify_password
 
-username = '${USER_TARGET}'
-new_pw = '''${NEW_PASS}'''
+username = os.environ.get('USER_TARGET', 'admin')
+new_pw = os.environ.get('NEW_PASS', '')
+
+if not new_pw:
+    print('❌ Lỗi: Mật khẩu rỗng!')
+    exit(1)
 
 hashed = bcrypt.hashpw(new_pw.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
@@ -51,18 +63,26 @@ u.password_hash = hashed
 u.is_active = True
 db.add(u)
 db.commit()
+db.refresh(u)
+
+is_new_valid = verify_password(new_pw, u.password_hash)
+is_old_blocked = not verify_password('nckh@2026', u.password_hash) if new_pw != 'nckh@2026' else False
+
+print(f'  ✅ Đã lưu hash mật khẩu mới cho user [{u.username}]!')
+print(f'  🔍 Kiểm thử mật khẩu mới: {\"HỢP LỆ (THÀNH CÔNG)\" if is_new_valid else \"THẤT BẠI\"}')
+if new_pw != 'nckh@2026':
+    print(f'  🔒 Mật khẩu cũ nckh@2026: {\"ĐÃ BỊ VÔ HIỆU HÓA HOÀN TOÀN\" if is_old_blocked else \"VẪN CÒN HOẠT ĐỘNG\"}')
 db.close()
-print(f'  ✅ Đã đổi mật khẩu thành công cho người dùng: [{username}]')
 "
 
-echo ">> [3/3] Khởi động lại Backend để áp dụng các thay đổi..."
+echo ">> [4/4] Khởi động lại Backend để nạp code xác thực mới..."
 docker compose restart backend >/dev/null 2>&1 || true
 
 echo ""
 echo "===================================================================="
-echo "🎉 HOÀN TẤT ĐỔI MẬT KHẨU & CẬP NHẬT BẢO MẬT!"
+echo "🎉 HOÀN TẤT ĐỔI MẬT KHẨU & BẢO VỆ HỆ THỐNG!"
 echo "===================================================================="
 echo "  👉 Username: $USER_TARGET"
 echo "  👉 Mật khẩu: (Đã lưu mật khẩu mới của bạn)"
 echo "===================================================================="
-echo "Bây giờ bạn hãy mở lại trình duyệt và đăng nhập với mật khẩu mới!"
+echo "Bây giờ bạn hãy quay lại web và đăng nhập bằng MẬT KHẨU MỚI!"
