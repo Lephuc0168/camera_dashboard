@@ -590,7 +590,7 @@ export const PersonsPage: React.FC = () => {
                     </div>
                   ) : previewUrls.length > 0 ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', maxHeight: '180px', overflowY: 'auto', padding: '4px' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', maxHeight: '180px', overflowY: 'auto', overflowX: 'hidden', padding: '8px' }}>
                         {previewUrls.map((url, idx) => (
                           <div key={idx} style={{ position: 'relative' }}>
                             <img 
