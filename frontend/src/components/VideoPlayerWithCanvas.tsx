@@ -48,16 +48,19 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
   const liveDets = currentFeed?.detections ?? detections;
   const liveFps = currentFeed?.fps ?? fps;
 
-  const jetsonIp = localStorage.getItem('custom_backend_ip')?.split(':')[0] || '10.39.4.131';
+  const jetsonIp = localStorage.getItem('custom_backend_ip')?.split(':')[0] || window.location.hostname || '127.0.0.1';
   let effectiveCid = active || 'camera_1';
   if (effectiveCid === 'camera_01') effectiveCid = 'camera_1';
   else if (effectiveCid === 'camera_02') effectiveCid = 'camera_2';
 
-  const proxyUrl = `http://${jetsonIp}:8000/api/v1/cameras/stream/${effectiveCid}`;
+  const token = localStorage.getItem('access_token') || '';
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
+
+  const proxyUrl = `http://${jetsonIp}:8000/api/v1/cameras/stream/${effectiveCid}${tokenQuery}`;
   const directUrl = `http://${jetsonIp}:5001/video_feed/${effectiveCid}`;
 
   const fallbackStreamUrl = currentFeed?.streamUrl
-    || (streamError ? proxyUrl : directUrl);
+    || (streamError ? directUrl : proxyUrl);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -237,10 +240,6 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
               );
             })}
           </div>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981' }}></span>
-            Secured Stream Feed
-          </span>
         </div>
       )}
 

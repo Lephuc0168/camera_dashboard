@@ -43,6 +43,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix=settings.API_V1_STR)
 app.include_router(persons_router, prefix=settings.API_V1_STR)
 app.include_router(cameras_router, prefix=settings.API_V1_STR)
+app.include_router(cameras_router, prefix="/api/v1")
 app.include_router(events_router, prefix=settings.API_V1_STR)
 app.include_router(thresholds_router, prefix=settings.API_V1_STR)
 app.include_router(stats_router, prefix=settings.API_V1_STR)

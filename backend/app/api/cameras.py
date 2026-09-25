@@ -1,14 +1,50 @@
 from uuid import UUID
 import urllib.request
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import Camera, User
 from app.schemas.camera import CameraCreate, CameraRead
 from app.auth.jwt import get_current_user, require_role
+from jose import JWTError, jwt
+from app.config import settings
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
+
+def get_stream_user(
+    token: str | None = Query(None),
+    authorization: str | None = Header(None),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Validates JWT token for live camera stream access.
+    Supports token passed via '?token=' query parameter (standard for browser <img> tags)
+    or via 'Authorization: Bearer <token>' header.
+    """
+    raw_token = token
+    if not raw_token and authorization and authorization.startswith("Bearer "):
+        raw_token = authorization.split(" ")[1]
+
+    if not raw_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token required to access secure camera stream",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = jwt.decode(raw_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token credentials")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
+
+    user = db.query(User).filter(User.username == username).first()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
+    return user
 
 def generate_camera_stream(camera_id: str):
     cid_clean = camera_id.lower().strip()
@@ -43,10 +79,13 @@ def generate_camera_stream(camera_id: str):
             continue
 
 @router.get("/stream/{camera_id}")
-def stream_camera(camera_id: str):
+def stream_camera(
+    camera_id: str,
+    current_user: User = Depends(get_stream_user)
+):
     """
     Proxy camera live stream from Jetson local video feed (port 5001 / 5000) through FastAPI (port 8000).
-    Allows client browsers to receive live feeds without requiring external port 5001 access.
+    Enforces JWT authentication: only authenticated active users can view the stream.
     """
     return StreamingResponse(
         generate_camera_stream(camera_id),
