@@ -219,23 +219,31 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
               );
             })}
           </div>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-            Active feed: <code>{fallbackStreamUrl}</code>
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981' }}></span>
+            Secured Stream Feed
           </span>
         </div>
       )}
 
-      <div ref={containerRef} className="glass-panel" style={{
-        position: 'relative',
-        width: '100%',
-        height: '480px',
-        overflow: 'hidden',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#0c1322',
-        borderRadius: 'var(--radius-lg)'
-      }}>
+      <div
+        ref={containerRef}
+        className="glass-panel"
+        onContextMenu={(e) => e.preventDefault()}
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: '480px',
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#0c1322',
+          borderRadius: 'var(--radius-lg)',
+          userSelect: 'none',
+          WebkitUserSelect: 'none'
+        }}
+      >
         <div style={{
           position: 'absolute',
           inset: 0,
@@ -262,7 +270,7 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
             {active ? (camNames[active] || active) : 'Jetson Camera Stream'}
           </h4>
           <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', textAlign: 'center', maxWidth: '420px' }}>
-            Connecting to <code>{fallbackStreamUrl}</code>
+            Connecting to secure camera feed...
           </p>
         </div>
 
@@ -274,6 +282,9 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
             alt="Live Camera Feed"
             onLoad={handleImgLoad}
             onError={() => setStreamError(true)}
+            onContextMenu={(e) => e.preventDefault()}
+            onDragStart={(e) => e.preventDefault()}
+            draggable={false}
             style={{
               position: 'absolute',
               inset: 0,
@@ -281,7 +292,10 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
               height: '100%',
               objectFit: 'cover',
               zIndex: 5,
-              opacity: streamError && !liveFrame ? 0.15 : 1
+              opacity: streamError && !liveFrame ? 0.15 : 1,
+              pointerEvents: 'none',
+              userSelect: 'none',
+              WebkitUserSelect: 'none'
             }}
           />
         )}
@@ -296,6 +310,21 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
             height: '100%',
             pointerEvents: 'none',
             zIndex: 10
+          }}
+        />
+
+        {/* Transparent Protection Shield to block context menu and image grabbing */}
+        <div
+          onContextMenu={(e) => e.preventDefault()}
+          onDragStart={(e) => e.preventDefault()}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 15,
+            background: 'transparent',
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            cursor: 'default'
           }}
         />
 
