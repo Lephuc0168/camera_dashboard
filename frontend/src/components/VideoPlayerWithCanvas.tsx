@@ -168,6 +168,24 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
   }, [draw]);
 
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const blockEvent = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    };
+    container.addEventListener('contextmenu', blockEvent, { capture: true });
+    container.addEventListener('dragstart', blockEvent, { capture: true });
+    container.addEventListener('selectstart', blockEvent, { capture: true });
+    return () => {
+      container.removeEventListener('contextmenu', blockEvent, { capture: true });
+      container.removeEventListener('dragstart', blockEvent, { capture: true });
+      container.removeEventListener('selectstart', blockEvent, { capture: true });
+    };
+  }, []);
+
+  useEffect(() => {
     if (streamError) {
       const timer = setTimeout(() => {
         setStreamError(false);
