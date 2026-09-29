@@ -246,3 +246,13 @@ h1, h2, h3, h4 {
     padding: 16px;
   }
 }
+
+/* Form Controls & Select Dropdowns */
+select {
+  color-scheme: dark;
+}
+
+select option {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+}

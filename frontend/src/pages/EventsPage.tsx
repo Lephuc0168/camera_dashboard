@@ -65,10 +65,10 @@ export const EventsPage: React.FC = () => {
           onChange={(e) => setStatusFilter(e.target.value)}
           style={selectStyle}
         >
-          <option value="">All Statuses</option>
-          <option value="KNOWN">KNOWN</option>
-          <option value="UNKNOWN">UNKNOWN</option>
-          <option value="ABSTAIN">ABSTAIN</option>
+          <option value="" style={optionStyle}>All Statuses</option>
+          <option value="KNOWN" style={optionStyle}>KNOWN</option>
+          <option value="UNKNOWN" style={optionStyle}>UNKNOWN</option>
+          <option value="ABSTAIN" style={optionStyle}>ABSTAIN</option>
         </select>
 
         <select
@@ -76,10 +76,10 @@ export const EventsPage: React.FC = () => {
           onChange={(e) => setThresholdTypeFilter(e.target.value)}
           style={selectStyle}
         >
-          <option value="">All Threshold Types</option>
-          <option value="identity_gpd">Identity GPD</option>
-          <option value="global_evt">Global EVT</option>
-          <option value="fixed">Fixed Threshold</option>
+          <option value="" style={optionStyle}>All Threshold Types</option>
+          <option value="identity_gpd" style={optionStyle}>Identity GPD</option>
+          <option value="global_evt" style={optionStyle}>Global EVT</option>
+          <option value="fixed" style={optionStyle}>Fixed Threshold</option>
         </select>
 
         <select
@@ -87,9 +87,9 @@ export const EventsPage: React.FC = () => {
           onChange={(e) => setFallbackFilter(e.target.value)}
           style={selectStyle}
         >
-          <option value="">All Fallback States</option>
-          <option value="true">Fallback Used Only</option>
-          <option value="false">Per-Identity Fit Only</option>
+          <option value="" style={optionStyle}>All Fallback States</option>
+          <option value="true" style={optionStyle}>Fallback Used Only</option>
+          <option value="false" style={optionStyle}>Per-Identity Fit Only</option>
         </select>
       </div>
 
@@ -149,12 +149,20 @@ export const EventsPage: React.FC = () => {
 };
 
 const selectStyle: React.CSSProperties = {
-  background: 'rgba(255, 255, 255, 0.05)',
+  background: '#131b2e',
   border: '1px solid var(--border-glass)',
   borderRadius: 'var(--radius-md)',
-  color: 'white',
-  padding: '8px 12px',
+  color: '#f8fafc',
+  padding: '8px 14px',
   fontSize: '0.88rem',
+  fontWeight: 500,
   outline: 'none',
-  cursor: 'pointer'
+  cursor: 'pointer',
+  colorScheme: 'dark'
+};
+
+const optionStyle: React.CSSProperties = {
+  backgroundColor: '#0f172a',
+  color: '#f8fafc',
+  padding: '8px 12px'
 };
