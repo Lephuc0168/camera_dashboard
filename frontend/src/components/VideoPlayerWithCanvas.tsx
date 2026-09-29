@@ -48,7 +48,7 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
   const liveDets = currentFeed?.detections ?? detections;
   const liveFps = currentFeed?.fps ?? fps;
 
-  const jetsonIp = localStorage.getItem('custom_backend_ip')?.split(':')[0] || window.location.hostname || '127.0.0.1';
+  const customBackend = localStorage.getItem('custom_backend_ip');
   let effectiveCid = active || 'camera_1';
   if (effectiveCid === 'camera_01') effectiveCid = 'camera_1';
   else if (effectiveCid === 'camera_02') effectiveCid = 'camera_2';
@@ -56,8 +56,18 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
   const token = localStorage.getItem('access_token') || '';
   const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
 
-  const proxyUrl = `http://${jetsonIp}:8000/api/v1/cameras/stream/${effectiveCid}${tokenQuery}`;
-  const directUrl = `http://${jetsonIp}:5001/video_feed/${effectiveCid}`;
+  // In production (behind Nginx/Cloudflare), use relative /api path so requests go over current protocol (HTTPS)
+  // without hardcoding port 8000 (which is blocked by Cloudflare and mixed-content browser policies).
+  let proxyUrl: string;
+  if (customBackend) {
+    let cleanIp = customBackend.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!cleanIp.includes(':')) cleanIp = `${cleanIp}:8000`;
+    proxyUrl = `http://${cleanIp}/api/v1/cameras/stream/${effectiveCid}${tokenQuery}`;
+  } else {
+    proxyUrl = `/api/v1/cameras/stream/${effectiveCid}${tokenQuery}`;
+  }
+
+  const directUrl = customBackend ? `http://${customBackend.split(':')[0]}:5001/video_feed/${effectiveCid}` : proxyUrl;
 
   const fallbackStreamUrl = currentFeed?.streamUrl
     || (streamError ? directUrl : proxyUrl);
