@@ -32,6 +32,8 @@ export interface Camera {
 export interface RecognitionEvent {
   event_id: string;
   camera_id?: string;
+  camera_code?: string;
+  camera_name?: string;
   track_id: number;
   person_id?: string;
   person_name?: string;

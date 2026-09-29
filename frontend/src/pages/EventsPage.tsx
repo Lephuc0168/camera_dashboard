@@ -6,6 +6,7 @@ import { Filter, RefreshCw } from 'lucide-react';
 
 export const EventsPage: React.FC = () => {
   const [events, setEvents] = useState<RecognitionEvent[]>([]);
+  const [cameraFilter, setCameraFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [thresholdTypeFilter, setThresholdTypeFilter] = useState<string>('');
   const [fallbackFilter, setFallbackFilter] = useState<string>('');
@@ -15,6 +16,7 @@ export const EventsPage: React.FC = () => {
     if (!silent) setLoading(true);
     try {
       const params = new URLSearchParams();
+      if (cameraFilter) params.append('camera_id', cameraFilter);
       if (statusFilter) params.append('status', statusFilter);
       if (thresholdTypeFilter) params.append('threshold_type', thresholdTypeFilter);
       if (fallbackFilter !== '') params.append('fallback_used', fallbackFilter);
@@ -38,7 +40,7 @@ export const EventsPage: React.FC = () => {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [statusFilter, thresholdTypeFilter, fallbackFilter]);
+  }, [cameraFilter, statusFilter, thresholdTypeFilter, fallbackFilter]);
 
   return (
     <div>
@@ -59,6 +61,16 @@ export const EventsPage: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-muted)' }}>
           <Filter size={16} /> Filter Events:
         </div>
+
+        <select
+          value={cameraFilter}
+          onChange={(e) => setCameraFilter(e.target.value)}
+          style={selectStyle}
+        >
+          <option value="" style={optionStyle}>All Cameras</option>
+          <option value="camera_01" style={optionStyle}>RTSP Camera 01</option>
+          <option value="camera_02" style={optionStyle}>CSI Camera 02</option>
+        </select>
 
         <select
           value={statusFilter}
@@ -99,6 +111,7 @@ export const EventsPage: React.FC = () => {
           <thead>
             <tr>
               <th>Timestamp</th>
+              <th>Camera</th>
               <th>Track ID</th>
               <th>Person Name</th>
               <th>Status</th>
@@ -111,35 +124,52 @@ export const EventsPage: React.FC = () => {
           <tbody>
             {events.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '32px' }}>
+                <td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '32px' }}>
                   No recognition events found matching criteria.
                 </td>
               </tr>
             ) : (
-              events.map((ev) => (
-                <tr key={ev.event_id}>
-                  <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    {new Date(ev.occurred_at).toLocaleString()}
-                  </td>
-                  <td>#{ev.track_id}</td>
-                  <td style={{ fontWeight: 600 }}>{ev.person_name || 'UNKNOWN'}</td>
-                  <td>
-                    <StatusBadge type={ev.status.toLowerCase() as any} />
-                  </td>
-                  <td style={{ fontWeight: 600 }}>{ev.similarity ? ev.similarity.toFixed(3) : 'N/A'}</td>
-                  <td>{ev.threshold_value ? ev.threshold_value.toFixed(3) : 'N/A'}</td>
-                  <td>
-                    <StatusBadge type={ev.threshold_type} />
-                  </td>
-                  <td>
-                    {ev.fallback_used ? (
-                      <span style={{ color: 'var(--accent-amber)', fontSize: '0.82rem', fontWeight: 600 }}>FALLBACK</span>
-                    ) : (
-                      <span style={{ color: 'var(--accent-green)', fontSize: '0.82rem', fontWeight: 600 }}>PER-IDENTITY FIT</span>
-                    )}
-                  </td>
-                </tr>
-              ))
+              events.map((ev) => {
+                const isCam2 = ev.camera_code?.includes('2') || ev.camera_name?.includes('02') || ev.camera_name?.includes('CSI');
+                const camDisplay = ev.camera_name || (isCam2 ? 'CSI Camera 02' : 'RTSP Camera 01');
+                return (
+                  <tr key={ev.event_id}>
+                    <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      {new Date(ev.occurred_at).toLocaleString()}
+                    </td>
+                    <td>
+                      <span style={{
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        background: isCam2 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+                        color: isCam2 ? '#34d399' : '#818cf8',
+                        border: `1px solid ${isCam2 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(99, 102, 241, 0.3)'}`
+                      }}>
+                        {camDisplay}
+                      </span>
+                    </td>
+                    <td>#{ev.track_id}</td>
+                    <td style={{ fontWeight: 600 }}>{ev.person_name || 'UNKNOWN'}</td>
+                    <td>
+                      <StatusBadge type={ev.status.toLowerCase() as any} />
+                    </td>
+                    <td style={{ fontWeight: 600 }}>{ev.similarity ? ev.similarity.toFixed(3) : 'N/A'}</td>
+                    <td>{ev.threshold_value ? ev.threshold_value.toFixed(3) : 'N/A'}</td>
+                    <td>
+                      <StatusBadge type={ev.threshold_type} />
+                    </td>
+                    <td>
+                      {ev.fallback_used ? (
+                        <span style={{ color: 'var(--accent-amber)', fontSize: '0.82rem', fontWeight: 600 }}>FALLBACK</span>
+                      ) : (
+                        <span style={{ color: 'var(--accent-green)', fontSize: '0.82rem', fontWeight: 600 }}>PER-IDENTITY FIT</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

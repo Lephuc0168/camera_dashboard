@@ -15,6 +15,8 @@ interface VideoPlayerWithCanvasProps {
   detections?: DetectionBox[];
   frameBase64?: string;
   fps?: number;
+  activeCam?: string | null;
+  onCameraChange?: (cam: string) => void;
 }
 
 const FALLBACK_STREAM_URL = 'http://10.39.4.131:5001/video_feed/camera_1';
@@ -32,15 +34,19 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
   feeds,
   detections = [],
   frameBase64,
-  fps = 30.0
+  fps = 30.0,
+  activeCam: controlledActiveCam,
+  onCameraChange
 }) => {
-  const feedKeys = feeds ? Object.keys(feeds) : [];
-  const orderedKeys = [...feedKeys].sort(
+  const defaultKeys = ['camera_01', 'camera_02'];
+  const feedKeys = feeds && Object.keys(feeds).length > 0 ? Object.keys(feeds) : defaultKeys;
+  const orderedKeys = [...new Set([...feedKeys, ...defaultKeys])].sort(
     (a, b) => (CAM_ORDER.indexOf(a) === -1 ? 99 : CAM_ORDER.indexOf(a)) - (CAM_ORDER.indexOf(b) === -1 ? 99 : CAM_ORDER.indexOf(b))
   );
 
-  const [activeCam, setActiveCam] = useState<string | null>(null);
-  const active = activeCam && feedKeys.includes(activeCam) ? activeCam : (orderedKeys[0] || null);
+  const [internalActiveCam, setInternalActiveCam] = useState<string | null>(null);
+  const currentCam = controlledActiveCam !== undefined ? controlledActiveCam : internalActiveCam;
+  const active = currentCam || orderedKeys[0] || 'camera_01';
   const [streamError, setStreamError] = useState(false);
 
   const currentFeed = active ? feeds?.[active] : undefined;
@@ -167,7 +173,10 @@ export const VideoPlayerWithCanvas: React.FC<VideoPlayerWithCanvasProps> = ({
   }, [draw]);
 
   const handleSwitchCam = (cam: string) => {
-    setActiveCam(cam);
+    setInternalActiveCam(cam);
+    if (onCameraChange) {
+      onCameraChange(cam);
+    }
     setStreamError(false);
     videoSizeRef.current = null;
   };

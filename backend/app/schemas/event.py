@@ -26,5 +26,7 @@ class RecognitionEventRead(RecognitionEventBase):
     event_id: UUID
     occurred_at: datetime
     person_name: str | None = None
+    camera_code: str | None = None
+    camera_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

@@ -153,18 +153,31 @@ def on_startup():
                 admin_user.password_hash = get_password_hash("nckh@2026")
             db.commit()
             
-        # Seed default Camera if not exists
-        default_cam = db.query(Camera).filter(Camera.camera_code == "camera_01").first()
-        if not default_cam:
-            logger.info("Seeding default camera (camera_01)...")
-            cam = Camera(
+        # Seed default Cameras if not exists
+        default_cam1 = db.query(Camera).filter(Camera.camera_code.in_(["camera_01", "camera_1"])).first()
+        if not default_cam1:
+            logger.info("Seeding default camera 01 (camera_01)...")
+            cam1 = Camera(
                 camera_code="camera_01",
-                name="Jetson CSI Camera 01",
+                name="RTSP Camera 01",
+                source_type="rtsp",
+                source_config={"url": "rtsp://127.0.0.1:8554/live", "width": 1920, "height": 1080, "fps": 30},
+                is_active=True
+            )
+            db.add(cam1)
+            db.commit()
+
+        default_cam2 = db.query(Camera).filter(Camera.camera_code.in_(["camera_02", "camera_2"])).first()
+        if not default_cam2:
+            logger.info("Seeding default camera 02 (camera_02)...")
+            cam2 = Camera(
+                camera_code="camera_02",
+                name="CSI Camera 02",
                 source_type="csi",
                 source_config={"sensor_id": 0, "width": 1920, "height": 1080, "fps": 30},
                 is_active=True
             )
-            db.add(cam)
+            db.add(cam2)
             db.commit()
 
         # Auto-seed identity_thresholds if empty

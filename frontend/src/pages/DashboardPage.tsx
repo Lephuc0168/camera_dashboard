@@ -20,15 +20,17 @@ export const DashboardPage: React.FC = () => {
     ram: 42,
     temp: 51
   });
+  const [selectedCam, setSelectedCam] = useState<string>('camera_01');
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (cam = selectedCam) => {
     try {
       setErrorMsg(null);
+      const camParam = cam ? `&camera_id=${encodeURIComponent(cam)}` : '';
       const [statsRes, eventsRes] = await Promise.all([
         api.get('/stats/summary'),
-        api.get('/events?limit=10')
+        api.get(`/events?limit=30${camParam}`)
       ]);
       setStats(statsRes.data || null);
       setRecentEvents(Array.isArray(eventsRes.data) ? eventsRes.data : []);
@@ -48,11 +50,16 @@ export const DashboardPage: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchDashboardData();
+    fetchDashboardData(selectedCam);
+    // Auto-refresh events & stats every 3 seconds for the currently selected camera
+    const interval = setInterval(() => {
+      fetchDashboardData(selectedCam);
+    }, 3000);
 
-    // Auto-refresh events & stats every 4 seconds
-    const interval = setInterval(fetchDashboardData, 4000);
+    return () => clearInterval(interval);
+  }, [selectedCam]);
 
+  useEffect(() => {
     // Setup real-time WebSocket connection for live inference metadata
     let ws: InferenceWebSocket | null = null;
     try {
@@ -90,10 +97,18 @@ export const DashboardPage: React.FC = () => {
     }
 
     return () => {
-      clearInterval(interval);
       if (ws) ws.disconnect();
     };
   }, []);
+
+  const isCam2 = selectedCam.includes('2') && !selectedCam.includes('01');
+  const activeCamLabel = isCam2 ? 'CSI Camera 02' : 'RTSP Camera 01';
+
+  const filteredEvents = recentEvents.filter((ev) => {
+    if (!ev.camera_code) return true;
+    const isEvCam2 = ev.camera_code.includes('2') && !ev.camera_code.includes('01');
+    return isCam2 ? isEvCam2 : !isEvCam2;
+  });
 
   const fallbackRate = typeof stats?.fallback_rate === 'number' ? stats.fallback_rate : Number(stats?.fallback_rate || 0);
   const safeFps = typeof fps === 'number' && !isNaN(fps) ? fps : 30.0;
@@ -107,7 +122,7 @@ export const DashboardPage: React.FC = () => {
             NVIDIA DeepStream + Identity-wise EVT Open-Set Face Recognition
           </p>
         </div>
-        <button onClick={fetchDashboardData} className="glass-button" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'white', border: '1px solid var(--border-glass)' }}>
+        <button onClick={() => fetchDashboardData(selectedCam)} className="glass-button" style={{ background: 'rgba(255, 255, 255, 0.05)', color: 'white', border: '1px solid var(--border-glass)' }}>
           <RefreshCw size={16} /> Refresh Stats
         </button>
       </div>
@@ -186,20 +201,40 @@ export const DashboardPage: React.FC = () => {
       {/* Main Grid: Video Stream + Recent Events */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: '20px' }}>
         <div>
-          <VideoPlayerWithCanvas feeds={feeds} detections={detections} frameBase64={frameBase64} fps={safeFps} />
+          <VideoPlayerWithCanvas
+            feeds={feeds}
+            detections={detections}
+            frameBase64={frameBase64}
+            fps={safeFps}
+            activeCam={selectedCam}
+            onCameraChange={(cam) => setSelectedCam(cam)}
+          />
         </div>
 
         <div>
-          <h3 style={{ fontSize: '1.1rem', marginBottom: '12px' }}>Recent Recognition Events</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h3 style={{ fontSize: '1.1rem', margin: 0 }}>Recent Recognition Events</h3>
+            <span style={{
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              padding: '3px 10px',
+              borderRadius: '12px',
+              background: isCam2 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+              color: isCam2 ? '#10b981' : '#818cf8',
+              border: `1px solid ${isCam2 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(99, 102, 241, 0.3)'}`
+            }}>
+              {activeCamLabel}
+            </span>
+          </div>
           <div className="glass-panel" style={{ padding: '16px', maxHeight: '480px', overflowY: 'auto' }}>
-            {recentEvents.length === 0 ? (
+            {filteredEvents.length === 0 ? (
               <div style={{ textAlign: 'center', color: 'var(--text-dim)', padding: '32px 0' }}>
                 <Activity size={32} color="var(--text-dim)" style={{ margin: '0 auto 8px', opacity: 0.5 }} />
-                <p>No events recorded yet.</p>
+                <p>No events recorded yet for {activeCamLabel}.</p>
                 <span style={{ fontSize: '0.78rem' }}>Waiting for faces detected by DeepStream...</span>
               </div>
             ) : (
-              recentEvents.map((ev, index) => (
+              filteredEvents.map((ev, index) => (
                 <div key={ev.event_id || index} style={{
                   padding: '12px',
                   borderRadius: 'var(--radius-md)',
