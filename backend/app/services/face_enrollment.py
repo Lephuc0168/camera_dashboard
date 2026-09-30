@@ -4,10 +4,40 @@ import logging
 from datetime import datetime, timezone
 import numpy as np
 
+_CV2_IMPORT_ERROR = None
+
+def _init_cv2():
+    global cv2, _CV2_IMPORT_ERROR
+    if cv2 is not None:
+        return cv2
+    try:
+        import cv2 as _cv2
+        cv2 = _cv2
+        _CV2_IMPORT_ERROR = None
+        return cv2
+    except Exception as e:
+        cv2 = None
+        _CV2_IMPORT_ERROR = str(e)
+        logger.warning(f"Initial cv2 import failed: {e}")
+        try:
+            import subprocess, sys
+            logger.info("Attempting on-the-fly pip install of opencv-python-headless...")
+            subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless"], check=True, timeout=90)
+            import cv2 as _cv2
+            cv2 = _cv2
+            _CV2_IMPORT_ERROR = None
+            logger.info("opencv-python-headless installed and imported successfully!")
+            return cv2
+        except Exception as ie:
+            logger.error(f"Dynamic pip install failed: {ie}")
+            _CV2_IMPORT_ERROR = f"{e} (auto-install failed: {ie})"
+            return None
+
 try:
     import cv2
-except ImportError:
+except Exception as e:
     cv2 = None
+    _CV2_IMPORT_ERROR = str(e)
 
 try:
     from PIL import Image
@@ -55,9 +85,10 @@ class FaceDetectionError(QualityGateError):
 
 def decode_image(image_bytes: bytes) -> np.ndarray:
     """Decodes raw image bytes into BGR numpy array."""
-    if cv2 is not None:
+    active_cv2 = cv2 or _init_cv2()
+    if active_cv2 is not None:
         nparr = np.frombuffer(image_bytes, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        img = active_cv2.imdecode(nparr, active_cv2.IMREAD_COLOR)
         if img is not None:
             return img
 
@@ -77,11 +108,12 @@ def get_cascade(filename: str):
     if filename in _CASCADE_CACHE:
         return _CASCADE_CACHE[filename]
 
-    if cv2 is None:
-        logger.error(f"Cannot load cascade '{filename}': cv2 (OpenCV) is not imported!")
+    active_cv2 = cv2 or _init_cv2()
+    if active_cv2 is None:
+        logger.error(f"Cannot load cascade '{filename}': cv2 (OpenCV) is not imported! ({_CV2_IMPORT_ERROR})")
         return None
 
-    classifier_cls = getattr(cv2, "CascadeClassifier", None) or getattr(getattr(cv2, "objdetect", None), "CascadeClassifier", None)
+    classifier_cls = getattr(active_cv2, "CascadeClassifier", None) or getattr(getattr(active_cv2, "objdetect", None), "CascadeClassifier", None)
     if classifier_cls is None:
         logger.error(f"Cannot load cascade '{filename}': cv2.CascadeClassifier is not available!")
         return None
@@ -96,12 +128,31 @@ def get_cascade(filename: str):
         os.path.join(os.getcwd(), "backend", "app", "assets", "cascades", filename),
         os.path.join(os.getcwd(), "app", "assets", "cascades", filename),
     ]
-    if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades") and cv2.data.haarcascades:
-        candidates.append(os.path.join(cv2.data.haarcascades, filename))
+    if hasattr(active_cv2, "data") and hasattr(active_cv2.data, "haarcascades") and active_cv2.data.haarcascades:
+        candidates.append(os.path.join(active_cv2.data.haarcascades, filename))
     candidates.extend([
         f"/usr/share/opencv4/haarcascades/{filename}",
         f"/usr/share/opencv/haarcascades/{filename}",
+        f"/usr/local/share/opencv4/haarcascades/{filename}",
     ])
+
+    # Dynamic search if not found in static list
+    found_path = None
+    for c in candidates:
+        if c and os.path.isfile(c):
+            found_path = c
+            break
+
+    if not found_path:
+        for root_dir in ["/app", os.path.dirname(this_dir), os.getcwd()]:
+            if os.path.isdir(root_dir):
+                for root, _, files in os.walk(root_dir):
+                    if filename in files:
+                        found_path = os.path.join(root, filename)
+                        candidates.insert(0, found_path)
+                        break
+            if found_path:
+                break
 
     for c in candidates:
         if c and os.path.isfile(c):
@@ -121,7 +172,7 @@ def get_cascade(filename: str):
             except Exception:
                 pass
 
-    logger.error(f"Cascade file '{filename}' could not be loaded from candidates.")
+    logger.error(f"Cascade file '{filename}' could not be loaded from candidates: {candidates[:3]}")
     return None
 
 
@@ -180,9 +231,10 @@ def run_quality_gate(img: np.ndarray, is_webcam: bool = False, min_face_size: in
     frontal_cascade = get_cascade("haarcascade_frontalface_default.xml")
 
     if alt_cascade is None and frontal_cascade is None:
-        logger.error("CRITICAL: Haar frontal cascade classifiers are not loaded!")
+        diag = f"Lỗi nạp cv2: {_CV2_IMPORT_ERROR}" if (cv2 is None) else "Không nạp được cấu trúc XML Haar Cascade"
+        logger.error(f"CRITICAL: Haar frontal cascade classifiers are not loaded! ({diag})")
         raise FaceDetectionError(
-            "Quality Gate Lỗi Hệ Thống: Bộ phân loại khuôn mặt (Haar Cascade) chưa sẵn sàng trên máy chủ."
+            f"Quality Gate Lỗi Hệ Thống: Bộ phân loại khuôn mặt (Haar Cascade) chưa sẵn sàng trên máy chủ ({diag})."
         )
 
     faces = []
