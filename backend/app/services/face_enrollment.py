@@ -8,26 +8,38 @@ _CV2_IMPORT_ERROR = None
 
 def _init_cv2():
     global cv2, _CV2_IMPORT_ERROR
-    if cv2 is not None:
+    if cv2 is not None and hasattr(cv2, "CascadeClassifier"):
         return cv2
+
     try:
         import cv2 as _cv2
-        cv2 = _cv2
-        _CV2_IMPORT_ERROR = None
-        return cv2
+        if hasattr(_cv2, "CascadeClassifier"):
+            cv2 = _cv2
+            _CV2_IMPORT_ERROR = None
+            return cv2
+        else:
+            logger.warning(f"cv2 {_cv2.__version__} lacks CascadeClassifier, auto-downgrading to opencv-python-headless<5.0.0...")
+            raise RuntimeError(f"OpenCV {_cv2.__version__} has no CascadeClassifier")
     except Exception as e:
         cv2 = None
         _CV2_IMPORT_ERROR = str(e)
-        logger.warning(f"Initial cv2 import failed: {e}")
+        logger.warning(f"Initial cv2 import/compatibility failed: {e}")
         try:
-            import subprocess, sys
-            logger.info("Attempting on-the-fly pip install of opencv-python-headless...")
-            subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless"], check=True, timeout=90)
+            import subprocess, sys, importlib
+            logger.info("Attempting on-the-fly pip install of opencv-python-headless<5.0.0...")
+            subprocess.run([sys.executable, "-m", "pip", "install", "--no-cache-dir", "opencv-python-headless>=4.8.0.76,<5.0.0"], check=True, timeout=120)
+            if "cv2" in sys.modules:
+                del sys.modules["cv2"]
+            importlib.invalidate_caches()
             import cv2 as _cv2
-            cv2 = _cv2
-            _CV2_IMPORT_ERROR = None
-            logger.info("opencv-python-headless installed and imported successfully!")
-            return cv2
+            if hasattr(_cv2, "CascadeClassifier"):
+                cv2 = _cv2
+                _CV2_IMPORT_ERROR = None
+                logger.info(f"opencv-python-headless {cv2.__version__} with CascadeClassifier installed successfully!")
+                return cv2
+            else:
+                _CV2_IMPORT_ERROR = f"Installed OpenCV {_cv2.__version__} still lacks CascadeClassifier"
+                return None
         except Exception as ie:
             logger.error(f"Dynamic pip install failed: {ie}")
             _CV2_IMPORT_ERROR = f"{e} (auto-install failed: {ie})"
@@ -35,6 +47,8 @@ def _init_cv2():
 
 try:
     import cv2
+    if not hasattr(cv2, "CascadeClassifier"):
+        _init_cv2()
 except Exception as e:
     cv2 = None
     _CV2_IMPORT_ERROR = str(e)
@@ -231,7 +245,12 @@ def run_quality_gate(img: np.ndarray, is_webcam: bool = False, min_face_size: in
     frontal_cascade = get_cascade("haarcascade_frontalface_default.xml")
 
     if alt_cascade is None and frontal_cascade is None:
-        diag = f"Lỗi nạp cv2: {_CV2_IMPORT_ERROR}" if (cv2 is None) else "Không nạp được cấu trúc XML Haar Cascade"
+        cv2_ver = getattr(cv2, "__version__", "chưa nạp")
+        has_casc = hasattr(cv2, "CascadeClassifier") if cv2 is not None else False
+        if cv2 is None or not has_casc:
+            diag = f"OpenCV {cv2_ver} không có CascadeClassifier. Cần chạy: docker compose exec backend pip install 'opencv-python-headless<5.0.0'"
+        else:
+            diag = "Không thể đọc tệp XML Haar Cascade"
         logger.error(f"CRITICAL: Haar frontal cascade classifiers are not loaded! ({diag})")
         raise FaceDetectionError(
             f"Quality Gate Lỗi Hệ Thống: Bộ phân loại khuôn mặt (Haar Cascade) chưa sẵn sàng trên máy chủ ({diag})."
