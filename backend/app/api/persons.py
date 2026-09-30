@@ -1,4 +1,4 @@
-﻿import os
+import os
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -114,6 +114,19 @@ async def enroll_person_with_face(
         if existing:
             raise HTTPException(status_code=400, detail=f"Student code '{clean_code}' is already registered")
 
+    if photo is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Quality Gate Từ Chối: Chưa có ảnh khuôn mặt nào được tải lên. Vui lòng cung cấp ảnh chân dung khuôn mặt trực diện để đăng ký."
+        )
+
+    image_bytes = await photo.read()
+    if len(image_bytes) == 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Quality Gate Từ Chối: File ảnh tải lên rỗng (0 bytes). Vui lòng cung cấp ảnh chân dung hợp lệ."
+        )
+
     person = Person(
         full_name=full_name.strip(),
         student_code=clean_code,
@@ -127,25 +140,22 @@ async def enroll_person_with_face(
     quality_score = None
     photo_url = None
 
-    if photo is not None:
-        try:
-            image_bytes = await photo.read()
-            if len(image_bytes) > 0:
-                is_webcam = (photo.filename or "").startswith("webcam")
-                enroll_res = enroll_face_pipeline(image_bytes, person, db, is_webcam=is_webcam)
-                quality_score = enroll_res.get("quality_score")
-                photo_url = f"/api/persons/{person.person_id}/photo"
-        except (QualityFilterError, FaceDetectionError, QualityGateError) as qe:
-            db.delete(person)
-            db.commit()
-            raise HTTPException(status_code=422, detail=str(qe))
-        except Exception as e:
-            db.delete(person)
-            db.commit()
-            raise HTTPException(status_code=400, detail=f"Failed to process face enrollment: {str(e)}")
+    try:
+        is_webcam = (photo.filename or "").startswith("webcam")
+        enroll_res = enroll_face_pipeline(image_bytes, person, db, is_webcam=is_webcam)
+        quality_score = enroll_res.get("quality_score")
+        photo_url = f"/api/persons/{person.person_id}/photo"
+    except (QualityFilterError, FaceDetectionError, QualityGateError) as qe:
+        db.delete(person)
+        db.commit()
+        raise HTTPException(status_code=422, detail=str(qe))
+    except Exception as e:
+        db.delete(person)
+        db.commit()
+        raise HTTPException(status_code=400, detail=f"Failed to process face enrollment: {str(e)}")
 
     res = PersonRead.model_validate(person)
-    res.embedding_count = 1 if photo is not None else 0
+    res.embedding_count = 1
     res.quality_score = quality_score
     res.photo_url = photo_url
     return res

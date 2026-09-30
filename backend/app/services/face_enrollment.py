@@ -70,33 +70,58 @@ def decode_image(image_bytes: bytes) -> np.ndarray:
     raise RuntimeError("No image processing backend available (requires opencv-python or Pillow).")
 
 
+_CASCADE_CACHE = {}
+
 def get_cascade(filename: str):
     """Loads a cascade classifier by checking bundled assets first, then cv2.data, then system paths."""
+    if filename in _CASCADE_CACHE:
+        return _CASCADE_CACHE[filename]
+
     if cv2 is None:
+        logger.error(f"Cannot load cascade '{filename}': cv2 (OpenCV) is not imported!")
         return None
+
     classifier_cls = getattr(cv2, "CascadeClassifier", None) or getattr(getattr(cv2, "objdetect", None), "CascadeClassifier", None)
     if classifier_cls is None:
+        logger.error(f"Cannot load cascade '{filename}': cv2.CascadeClassifier is not available!")
         return None
+
+    this_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = [
+        os.path.join(this_dir, "..", "assets", "cascades", filename),
+        os.path.join(this_dir, "assets", "cascades", filename),
         os.path.join(CASCADES_DIR, filename),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "cascades", filename),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "cascades", filename),
         f"/app/app/assets/cascades/{filename}",
         f"/app/assets/cascades/{filename}",
         os.path.join(os.getcwd(), "backend", "app", "assets", "cascades", filename),
         os.path.join(os.getcwd(), "app", "assets", "cascades", filename),
-        os.path.join(getattr(cv2, "data", None).haarcascades, filename) if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades") else None,
+    ]
+    if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades") and cv2.data.haarcascades:
+        candidates.append(os.path.join(cv2.data.haarcascades, filename))
+    candidates.extend([
         f"/usr/share/opencv4/haarcascades/{filename}",
         f"/usr/share/opencv/haarcascades/{filename}",
-    ]
+    ])
+
     for c in candidates:
         if c and os.path.isfile(c):
+            abs_c = os.path.abspath(c)
             try:
-                clf = classifier_cls(c)
+                clf = classifier_cls(abs_c)
                 if not clf.empty():
+                    _CASCADE_CACHE[filename] = clf
                     return clf
             except Exception:
-                continue
+                pass
+            try:
+                clf = classifier_cls()
+                if clf.load(abs_c) and not clf.empty():
+                    _CASCADE_CACHE[filename] = clf
+                    return clf
+            except Exception:
+                pass
+
+    logger.error(f"Cascade file '{filename}' could not be loaded from candidates.")
     return None
 
 
@@ -150,22 +175,31 @@ def run_quality_gate(img: np.ndarray, is_webcam: bool = False, min_face_size: in
         )
 
     # 4. Phát hiện khuôn mặt trực diện (Strict Frontal Face Detection)
-    frontal_cascade = get_cascade("haarcascade_frontalface_default.xml") or get_cascade("haarcascade_frontalface_alt2.xml")
-    if frontal_cascade is not None:
-        faces = frontal_cascade.detectMultiScale(
+    # Use alt2 cascade first (highly accurate tree-based detector with low false positive rate)
+    alt_cascade = get_cascade("haarcascade_frontalface_alt2.xml")
+    frontal_cascade = get_cascade("haarcascade_frontalface_default.xml")
+
+    if alt_cascade is None and frontal_cascade is None:
+        logger.error("CRITICAL: Haar frontal cascade classifiers are not loaded!")
+        raise FaceDetectionError(
+            "Quality Gate Lỗi Hệ Thống: Bộ phân loại khuôn mặt (Haar Cascade) chưa sẵn sàng trên máy chủ."
+        )
+
+    faces = []
+    if alt_cascade is not None:
+        faces = list(alt_cascade.detectMultiScale(
             gray,
             scaleFactor=1.1,
             minNeighbors=5,
             minSize=(min_face_size, min_face_size)
-        )
-    else:
-        logger.warning("Haar cascade files not loaded. Attempting adaptive center-crop fallback.")
-        # Fallback: Assume portrait photo is centered with 15% margins
-        fx = int(w * 0.15)
-        fy = int(h * 0.12)
-        fw = int(w * 0.70)
-        fh = int(h * 0.76)
-        faces = [(fx, fy, fw, fh)]
+        ))
+    if len(faces) == 0 and frontal_cascade is not None:
+        faces = list(frontal_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(min_face_size, min_face_size)
+        ))
 
     # 🔴 KHÔNG PHÁT HIỆN ĐƯỢC KHUÔN MẶT TRỰC DIỆN:
     if len(faces) == 0:
@@ -186,7 +220,7 @@ def run_quality_gate(img: np.ndarray, is_webcam: bool = False, min_face_size: in
 
         raise FaceDetectionError(
             "Quality Gate Từ Chối: Không phát hiện được khuôn mặt nào trong ảnh! "
-            "Vui lòng căn trọn vẹn khuôn mặt trực diện vào giữa khung hình."
+            "Vui lòng tải lên ảnh chụp người rõ ràng, căn trọn vẹn khuôn mặt trực diện vào giữa khung hình."
         )
 
     # 🔴 PHÁT HIỆN NHIỀU HƠN 1 KHUÔN MẶT:

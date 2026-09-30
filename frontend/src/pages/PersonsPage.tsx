@@ -198,7 +198,12 @@ export const PersonsPage: React.FC = () => {
   const handleEnrollPerson = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) {
-      setErrorMsg('Please provide a full name for the identity.');
+      setErrorMsg('Vui lòng nhập họ và tên của đối tượng.');
+      return;
+    }
+
+    if (selectedFiles.length === 0) {
+      setErrorMsg('Vui lòng chụp từ webcam hoặc tải lên ít nhất 1 ảnh chân dung khuôn mặt trực diện để đăng ký.');
       return;
     }
 
